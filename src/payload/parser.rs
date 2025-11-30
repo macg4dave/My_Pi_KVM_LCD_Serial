@@ -18,8 +18,6 @@ pub struct Payload {
     pub line2: String,
 
     #[serde(default)]
-    pub version: Option<u8>,
-    #[serde(default)]
     pub bar: Option<u8>,
     #[serde(default)]
     pub bar_value: Option<u32>,
@@ -106,15 +104,6 @@ impl RenderFrame {
         if let Some(timeout) = payload.page_timeout_ms {
             if timeout == 0 {
                 return Err(Error::Parse("page_timeout_ms must be > 0".into()));
-            }
-        }
-
-        if let Some(version) = payload.version {
-            const SUPPORTED_VERSION: u8 = 1;
-            if version != SUPPORTED_VERSION {
-                return Err(Error::Parse(format!(
-                    "unsupported version {version}, expected {SUPPORTED_VERSION}"
-                )));
             }
         }
 
@@ -259,7 +248,6 @@ mod tests {
         let payload = Payload {
             line1: "Hi".into(),
             line2: "There".into(),
-            version: None,
             bar: None,
             bar_value: None,
             bar_max: None,
@@ -300,13 +288,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsupported_version() {
-        let raw = r#"{"line1":"A","line2":"B","version":2}"#;
-        let err = RenderFrame::from_payload_json(raw).unwrap_err();
-        assert!(format!("{err}").contains("unsupported version"));
-    }
-
-    #[test]
     fn duration_ms_supports_new_and_legacy_names() {
         let raw_new = r#"{"line1":"","line2":"","duration_ms":1234}"#;
         let frame_new = RenderFrame::from_payload_json(raw_new).unwrap();
@@ -315,13 +296,6 @@ mod tests {
         let raw_legacy = r#"{"line1":"","line2":"","ttl_ms":2345}"#;
         let frame_legacy = RenderFrame::from_payload_json(raw_legacy).unwrap();
         assert_eq!(frame_legacy.duration_ms, Some(2345));
-    }
-
-    #[test]
-    fn supported_version_parses() {
-        let raw = r#"{"version":1,"line1":"V1","line2":""}"#;
-        let frame = parse(raw);
-        assert_eq!(frame.line1, "V1");
     }
 
     #[test]

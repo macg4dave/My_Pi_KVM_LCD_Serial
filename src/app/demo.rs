@@ -15,6 +15,31 @@ use std::{
 const MIN_RENDER_MS: u64 = 200;
 const BLINK_INTERVAL_MS: u64 = 500;
 
+const DEMO_PAYLOADS: [&str; 22] = [
+    r#"{"line1":"Up 12:34 CPU 42%","line2":"RAM 73%","bar_value":73,"bar_max":100,"bar_label":"RAM","mode":"dashboard","page_timeout_ms":4000}"#,
+    r#"{"line1":"CPU LOAD","line2":"Cores busy","bar":68,"bar_label":"CPU","page_timeout_ms":3500}"#,
+    r#"{"line1":"MEM usage","line2":"Using 1.8GB","bar_value":720,"bar_max":1000,"bar_label":"MEM","page_timeout_ms":3500}"#,
+    r#"{"line1":"DISK {0x00} /","line2":"85% used","bar":85,"bar_label":"DISK","page_timeout_ms":3500}"#,
+    r#"{"line1":"NET {0x00} 12.3Mbps","line2":"bar on top","bar":65,"bar_line1":true,"icons":["battery"],"page_timeout_ms":3500}"#,
+    r#"{"line1":"ALERT: Temp","line2":"85C HOT!","blink":true,"duration_ms":8000,"page_timeout_ms":4000}"#,
+    r#"{"line1":"ALERT: Fan Fail","line2":"Check cooling","blink":true,"backlight":true,"page_timeout_ms":4000}"#,
+    r#"{"line1":"Backlight OFF demo","line2":"It should go dark","backlight":false,"page_timeout_ms":3500}"#,
+    r#"{"line1":"Clear + Test Pattern","line2":"Ensure wiring is OK","clear":true,"test":true,"page_timeout_ms":3500}"#,
+    r#"{"line1":"Long banner that scrolls across the top line without showing line 2","line2":"ignored","mode":"banner","scroll_speed_ms":220,"page_timeout_ms":5000}"#,
+    r#"{"line1":"Scroll disabled for this long string that would otherwise move","line2":"","scroll":false,"page_timeout_ms":4000}"#,
+    r#"{"line1":"TTL example","line2":"Expires quickly","duration_ms":2000,"page_timeout_ms":3000}"#,
+    r#"{"line1":"Config reload hint","line2":"Reload config now","config_reload":true,"page_timeout_ms":3000}"#,
+    r#"{"line1":"Dashboard forces bottom bar","line2":"even if requested top","bar":88,"bar_line1":true,"mode":"dashboard","page_timeout_ms":4000}"#,
+    r#"{"line1":"Top bar only","line2":"bar_line1=true","bar":50,"bar_line1":true,"page_timeout_ms":3000}"#,
+    r#"{"line1":"Icons: Heart","line2":"{0x06} beats","icons":["heart"],"page_timeout_ms":3000}"#,
+    r#"{"line1":"Icons: Arrow","line2":"Look right","icons":["arrow"],"page_timeout_ms":3000}"#,
+    r#"{"line1":"Icons: Battery","line2":"Charge 90%","icons":["battery"],"bar":90,"page_timeout_ms":3000}"#,
+    r#"{"line1":"Fast scroll speed","line2":"0123456789abcdef0123456789abcdef","scroll_speed_ms":120,"page_timeout_ms":4000}"#,
+    r#"{"line1":"Slow scroll speed","line2":"abcdefghijklmnopqrstuvwxyz","scroll_speed_ms":400,"page_timeout_ms":4000}"#,
+    r#"{"line1":"Wide bar label","line2":"","bar":40,"bar_label":"NETWORK","page_timeout_ms":3000}"#,
+    r#"{"line1":"Checksum demo","line2":"no checksum set","page_timeout_ms":2500}"#,
+];
+
 pub fn run_demo(lcd: &mut Lcd, config: &mut AppConfig, logger: &Logger) -> Result<()> {
     let defaults = PayloadDefaults {
         scroll_speed_ms: config.scroll_speed_ms,
@@ -29,6 +54,7 @@ pub fn run_demo(lcd: &mut Lcd, config: &mut AppConfig, logger: &Logger) -> Resul
     let running = create_shutdown_flag()?;
     let mut idx = 0usize;
     let mut current_frame = frames[idx].clone();
+    logger.info(format!("demo payload: {}", DEMO_PAYLOADS[idx]));
     let mut last_render = Instant::now();
     let min_render_interval = Duration::from_millis(MIN_RENDER_MS);
     let mut scroll_offsets = super::events::ScrollOffsets::zero();
@@ -57,6 +83,7 @@ pub fn run_demo(lcd: &mut Lcd, config: &mut AppConfig, logger: &Logger) -> Resul
         if now >= next_page {
             idx = (idx + 1) % frames.len();
             current_frame = frames[idx].clone();
+            logger.info(format!("demo payload: {}", DEMO_PAYLOADS[idx]));
             scroll_offsets = super::events::ScrollOffsets::zero();
             next_scroll = now + Duration::from_millis(current_frame.scroll_speed_ms);
             next_page = now + Duration::from_millis(current_frame.page_timeout_ms);
@@ -128,33 +155,8 @@ pub fn run_demo(lcd: &mut Lcd, config: &mut AppConfig, logger: &Logger) -> Resul
 }
 
 fn build_demo_frames(defaults: PayloadDefaults) -> Result<Vec<RenderFrame>> {
-    let payloads = [
-        r#"{"version":1,"line1":"Up 12:34 CPU 42%","line2":"RAM 73%","bar_value":73,"bar_max":100,"bar_label":"RAM","mode":"dashboard","page_timeout_ms":4000}"#,
-        r#"{"version":1,"line1":"CPU LOAD","line2":"Cores busy","bar":68,"bar_label":"CPU","page_timeout_ms":3500}"#,
-        r#"{"version":1,"line1":"MEM usage","line2":"Using 1.8GB","bar_value":720,"bar_max":1000,"bar_label":"MEM","page_timeout_ms":3500}"#,
-        r#"{"version":1,"line1":"DISK {0x00} /","line2":"85% used","bar":85,"bar_label":"DISK","page_timeout_ms":3500}"#,
-        r#"{"version":1,"line1":"NET {0x00} 12.3Mbps","line2":"bar on top","bar":65,"bar_line1":true,"icons":["battery"],"page_timeout_ms":3500}"#,
-        r#"{"version":1,"line1":"ALERT: Temp","line2":"85C HOT!","blink":true,"duration_ms":8000,"page_timeout_ms":4000}"#,
-        r#"{"version":1,"line1":"ALERT: Fan Fail","line2":"Check cooling","blink":true,"backlight":true,"page_timeout_ms":4000}"#,
-        r#"{"version":1,"line1":"Backlight OFF demo","line2":"It should go dark","backlight":false,"page_timeout_ms":3500}"#,
-        r#"{"version":1,"line1":"Clear + Test Pattern","line2":"Ensure wiring is OK","clear":true,"test":true,"page_timeout_ms":3500}"#,
-        r#"{"version":1,"line1":"Long banner that scrolls across the top line without showing line 2","line2":"ignored","mode":"banner","scroll_speed_ms":220,"page_timeout_ms":5000}"#,
-        r#"{"version":1,"line1":"Scroll disabled for this long string that would otherwise move","line2":"","scroll":false,"page_timeout_ms":4000}"#,
-        r#"{"version":1,"line1":"TTL example","line2":"Expires quickly","duration_ms":2000,"page_timeout_ms":3000}"#,
-        r#"{"version":1,"line1":"Config reload hint","line2":"Reload config now","config_reload":true,"page_timeout_ms":3000}"#,
-        r#"{"version":1,"line1":"Dashboard forces bottom bar","line2":"even if requested top","bar":88,"bar_line1":true,"mode":"dashboard","page_timeout_ms":4000}"#,
-        r#"{"version":1,"line1":"Top bar only","line2":"bar_line1=true","bar":50,"bar_line1":true,"page_timeout_ms":3000}"#,
-        r#"{"version":1,"line1":"Icons: Heart","line2":"{0x06} beats","icons":["heart"],"page_timeout_ms":3000}"#,
-        r#"{"version":1,"line1":"Icons: Arrow","line2":"Look right","icons":["arrow"],"page_timeout_ms":3000}"#,
-        r#"{"version":1,"line1":"Icons: Battery","line2":"Charge 90%","icons":["battery"],"bar":90,"page_timeout_ms":3000}"#,
-        r#"{"version":1,"line1":"Fast scroll speed","line2":"0123456789abcdef0123456789abcdef","scroll_speed_ms":120,"page_timeout_ms":4000}"#,
-        r#"{"version":1,"line1":"Slow scroll speed","line2":"abcdefghijklmnopqrstuvwxyz","scroll_speed_ms":400,"page_timeout_ms":4000}"#,
-        r#"{"version":1,"line1":"Wide bar label","line2":"","bar":40,"bar_label":"NETWORK","page_timeout_ms":3000}"#,
-        r#"{"version":1,"line1":"Checksum demo","line2":"no checksum set","page_timeout_ms":2500}"#,
-    ];
-
-    let mut frames = Vec::with_capacity(payloads.len());
-    for raw in payloads {
+    let mut frames = Vec::with_capacity(DEMO_PAYLOADS.len());
+    for raw in DEMO_PAYLOADS {
         match RenderFrame::from_payload_json_with_defaults(raw, defaults) {
             Ok(frame) => frames.push(frame),
             Err(err) => return Err(Error::Parse(format!("demo payload invalid: {err}"))),
