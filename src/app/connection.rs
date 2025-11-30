@@ -10,7 +10,7 @@ pub(crate) fn attempt_serial_connect(
 ) -> Option<SerialPort> {
     match SerialPort::connect(device, baud) {
         Ok(mut port) => {
-            if let Err(err) = port.send_line("INIT") {
+            if let Err(err) = port.send_command_line("INIT") {
                 logger.log(format!("serial init failed: {err}; will retry"));
                 None
             } else {

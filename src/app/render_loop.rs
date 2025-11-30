@@ -8,6 +8,7 @@ use std::sync::{
 };
 
 use super::connection::{attempt_serial_connect, BackoffController};
+use super::events::ScrollOffsets;
 use super::input::Button;
 use super::lifecycle::{create_shutdown_flag, render_shutdown};
 use super::{AppConfig, Logger};
@@ -44,7 +45,7 @@ pub(super) fn run_render_loop(
     let mut current_frame: Option<RenderFrame> = None;
     let mut next_page = Instant::now();
     let mut next_scroll = Instant::now();
-    let mut scroll_offsets = (0usize, 0usize);
+    let mut scroll_offsets = ScrollOffsets::zero();
     let mut button = Button::new(config.button_gpio_pin).ok();
     let mut backlight_state = true;
     let blink_interval = Duration::from_millis(500);
@@ -77,7 +78,7 @@ pub(super) fn run_render_loop(
             if btn.is_pressed() {
                 if let Some(frame) = state.next_page() {
                     current_frame = Some(frame);
-                    scroll_offsets = (0, 0);
+                    scroll_offsets = ScrollOffsets::zero();
                     next_scroll =
                         now + Duration::from_millis(config.scroll_speed_ms);
                     lcd.clear()?;
@@ -88,7 +89,7 @@ pub(super) fn run_render_loop(
                             frame,
                             &mut last_render,
                             min_render_interval,
-                            scroll_offsets,
+                            (scroll_offsets.top, scroll_offsets.bottom),
                             heartbeat_on,
                         )?;
                     }
@@ -115,7 +116,7 @@ pub(super) fn run_render_loop(
 
         if let Some(port_ref) = port.as_mut() {
             buffer.clear();
-            match port_ref.read_line(&mut buffer) {
+            match port_ref.read_message_line(&mut buffer) {
                 Ok(read) => {
                     if read > 0 {
                         let line = buffer.trim_end_matches(&['\r', '\n'][..]).trim();
@@ -147,7 +148,7 @@ pub(super) fn run_render_loop(
                                 }
                                 Ok(Some(frame)) => {
                                     current_frame = Some(frame.clone());
-                                    scroll_offsets = (0, 0);
+                                    scroll_offsets = ScrollOffsets::zero();
                                     next_scroll =
                                         now + Duration::from_millis(config.scroll_speed_ms);
                                     lcd.clear()?;
@@ -165,7 +166,7 @@ pub(super) fn run_render_loop(
                                             frame,
                                             &mut last_render,
                                             min_render_interval,
-                                            scroll_offsets,
+                                            (scroll_offsets.top, scroll_offsets.bottom),
                                             heartbeat_on,
                                         )?;
                                     }
@@ -197,7 +198,7 @@ pub(super) fn run_render_loop(
         if state.len() > 1 && now >= next_page {
             if let Some(frame) = state.next_page() {
                 current_frame = Some(frame);
-                scroll_offsets = (0, 0);
+                scroll_offsets = ScrollOffsets::zero();
                 if let Some(frame) = current_frame.as_ref() {
                     next_page = now + Duration::from_millis(frame.page_timeout_ms);
                     lcd.clear()?;
@@ -210,7 +211,7 @@ pub(super) fn run_render_loop(
                         frame,
                         &mut last_render,
                         min_render_interval,
-                        scroll_offsets,
+                        (scroll_offsets.top, scroll_offsets.bottom),
                         heartbeat_on,
                     )?;
                 }
@@ -227,9 +228,9 @@ pub(super) fn run_render_loop(
                         || line_needs_scroll(&frame.line2, width)),
             };
             if needs_scroll && now >= next_scroll {
-                scroll_offsets = (
-                    advance_offset(&frame.line1, lcd.cols() as usize, scroll_offsets.0),
-                    advance_offset(&frame.line2, lcd.cols() as usize, scroll_offsets.1),
+                scroll_offsets = scroll_offsets.update(
+                    advance_offset(&frame.line1, lcd.cols() as usize, scroll_offsets.top),
+                    advance_offset(&frame.line2, lcd.cols() as usize, scroll_offsets.bottom),
                 );
                 next_scroll =
                     now + Duration::from_millis(frame.scroll_speed_ms);
@@ -238,7 +239,7 @@ pub(super) fn run_render_loop(
                     frame,
                     &mut last_render,
                     min_render_interval,
-                    scroll_offsets,
+                    (scroll_offsets.top, scroll_offsets.bottom),
                     heartbeat_on,
                 )?;
             }

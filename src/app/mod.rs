@@ -14,6 +14,7 @@ mod connection;
 mod render_loop;
 mod input;
 mod logger;
+mod events;
 
 use connection::{attempt_serial_connect, BackoffController};
 use render_loop::run_render_loop;

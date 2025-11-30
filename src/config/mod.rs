@@ -1,9 +1,7 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use crate::Result;
+use std::path::Path;
 
-use crate::{Error, Result};
+pub mod loader;
 
 pub const DEFAULT_DEVICE: &str = "/dev/ttyAMA0";
 pub const DEFAULT_BAUD: u32 = 115_200;
@@ -65,160 +63,25 @@ impl Default for Config {
 
 impl Config {
     pub fn load_or_default() -> Result<Self> {
-        let path = config_path()?;
-        if !path.exists() {
-            let cfg = Self::default();
-            cfg.save_to_path(&path)?;
-            return Ok(cfg);
-        }
-        Self::load_from_path(&path)
+        loader::load_or_default()
     }
 
     pub fn load_from_path(path: &Path) -> Result<Self> {
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-
-        let raw = fs::read_to_string(path)?;
-        Self::parse(&raw)
+        loader::load_from_path(path)
     }
 
     pub fn save(&self) -> Result<()> {
-        let path = config_path()?;
-        self.save_to_path(&path)
+        loader::save(self)
     }
 
     pub fn save_to_path(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let contents = format!(
-            "# seriallcd config\n\
-device = \"{}\"\n\
-baud = {}\n\
-cols = {}\n\
-rows = {}\n\
-scroll_speed_ms = {}\n\
-page_timeout_ms = {}\n\
-button_gpio_pin = {}\n\
-pcf8574_addr = {}\n\
-backoff_initial_ms = {}\n\
-backoff_max_ms = {}\n",
-            self.device,
-            self.baud,
-            self.cols,
-            self.rows,
-            self.scroll_speed_ms,
-            self.page_timeout_ms,
-            self.button_gpio_pin
-                .map(|p| p.to_string())
-                .unwrap_or_else(|| "null".into()),
-            format_pcf_addr(&self.pcf8574_addr),
-            self.backoff_initial_ms,
-            self.backoff_max_ms
-        );
-        fs::write(path, contents)?;
-        Ok(())
+        loader::save_to_path(self, path)
     }
 
+    #[allow(dead_code)]
     fn parse(raw: &str) -> Result<Self> {
-        let mut cfg = Config::default();
-
-        for (idx, line) in raw.lines().enumerate() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                continue;
-            }
-
-            let (key, value) = trimmed.split_once('=').ok_or_else(|| {
-                Error::InvalidArgs(format!("invalid config line {}: '{}'", idx + 1, line))
-            })?;
-
-            let key = key.trim();
-            let value = value.trim().trim_matches('"');
-            match key {
-                "device" => cfg.device = value.to_string(),
-                "baud" => {
-                    cfg.baud = value.parse().map_err(|_| {
-                        Error::InvalidArgs(format!("invalid baud value on line {}", idx + 1))
-                    })?;
-                }
-                "cols" => {
-                    cfg.cols = value.parse().map_err(|_| {
-                        Error::InvalidArgs(format!("invalid cols value on line {}", idx + 1))
-                    })?;
-                }
-                "rows" => {
-                    cfg.rows = value.parse().map_err(|_| {
-                        Error::InvalidArgs(format!("invalid rows value on line {}", idx + 1))
-                    })?;
-                }
-                "scroll_speed_ms" => {
-                    cfg.scroll_speed_ms = value.parse().map_err(|_| {
-                        Error::InvalidArgs(format!("invalid scroll_speed_ms on line {}", idx + 1))
-                    })?;
-                }
-                "page_timeout_ms" => {
-                    cfg.page_timeout_ms = value.parse().map_err(|_| {
-                        Error::InvalidArgs(format!("invalid page_timeout_ms on line {}", idx + 1))
-                    })?;
-                }
-                "pcf8574_addr" => {
-                    cfg.pcf8574_addr = parse_pcf_addr(value).map_err(|e| {
-                        Error::InvalidArgs(format!(
-                            "invalid pcf8574_addr on line {}: {e}",
-                            idx + 1
-                        ))
-                    })?;
-                }
-                "backoff_initial_ms" => {
-                    cfg.backoff_initial_ms = value.parse().map_err(|_| {
-                        Error::InvalidArgs(format!(
-                            "invalid backoff_initial_ms on line {}",
-                            idx + 1
-                        ))
-                    })?;
-                }
-                "backoff_max_ms" => {
-                    cfg.backoff_max_ms = value.parse().map_err(|_| {
-                        Error::InvalidArgs(format!(
-                            "invalid backoff_max_ms on line {}",
-                            idx + 1
-                        ))
-                    })?;
-                }
-                "button_gpio_pin" => {
-                    if value == "null" {
-                        cfg.button_gpio_pin = None;
-                    } else {
-                        cfg.button_gpio_pin = Some(value.parse().map_err(|_| {
-                            Error::InvalidArgs(format!(
-                                "invalid button_gpio_pin on line {}",
-                                idx + 1
-                            ))
-                        })?);
-                    }
-                }
-                other => {
-                    return Err(Error::InvalidArgs(format!(
-                        "unknown config key '{}' on line {}",
-                        other,
-                        idx + 1
-                    )));
-                }
-            }
-        }
-
-        Ok(cfg)
+        loader::parse(raw)
     }
-}
-
-fn config_path() -> Result<PathBuf> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| Error::InvalidArgs("HOME not set; cannot locate config directory".into()))?;
-    Ok(home.join(CONFIG_DIR_NAME).join(CONFIG_FILE_NAME))
 }
 
 fn parse_pcf_addr(raw: &str) -> std::result::Result<Pcf8574Addr, String> {
@@ -242,7 +105,7 @@ fn format_pcf_addr(addr: &Pcf8574Addr) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{fs, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
 
     fn temp_home(name: &str) -> PathBuf {
         let stamp = SystemTime::now()

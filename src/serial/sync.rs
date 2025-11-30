@@ -31,7 +31,8 @@ impl SerialPort {
         })
     }
 
-    pub fn send_line(&mut self, line: &str) -> Result<()> {
+    /// Send a single newline-terminated command line to the serial port.
+    pub fn send_command_line(&mut self, line: &str) -> Result<()> {
         let port = self
             .port
             .as_mut()
@@ -44,8 +45,8 @@ impl SerialPort {
         Ok(())
     }
 
-    /// Read a single line (newline-terminated). Returns 0 on timeout.
-    pub fn read_line(&mut self, buf: &mut String) -> Result<usize> {
+    /// Read a single newline-terminated message. Returns 0 on timeout.
+    pub fn read_message_line(&mut self, buf: &mut String) -> Result<usize> {
         buf.clear();
         let port = self
             .port
@@ -85,7 +86,7 @@ impl SerialPort {
     }
 
     /// Provide a temporary reader over the serial port.
-    pub fn take_reader(&mut self) -> Result<SerialReader<'_>> {
+    pub fn borrow_reader(&mut self) -> Result<SerialReader<'_>> {
         let port = self
             .port
             .as_deref_mut()
