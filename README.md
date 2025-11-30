@@ -316,8 +316,10 @@ the system mounted read-only (`ProtectSystem=strict`).
 ## Packaging & releases
 
 - Local Debian/RPM packaging metadata is included in `Cargo.toml`; see `docs/releasing.md` for the full workflow.
-- `scripts/local-release.sh` builds the release binary, `.deb`, and `.rpm` into `releases/<version>/` and can push
-  them to GitHub when `--upload` is passed (requires the `gh` CLI and an existing git tag for the version).
+- `scripts/local-release.sh` builds the release binary, `.deb`, and `.rpm` into `releases/<version>/` with names like
+  `seriallcd_v0.5_armv6.{deb,rpm}` plus the raw binary, and can push them to GitHub when `--upload` (or `--all`)
+  is passed (requires the `gh` CLI and an existing git tag for the version). Use `--all-targets` to build host + armv6/armv7/arm64;
+  the ARM builds run via Docker Buildx so no local cross toolchain is needed.
 
 ---
 

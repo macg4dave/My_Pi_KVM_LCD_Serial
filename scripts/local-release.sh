@@ -39,6 +39,11 @@ ALL_TARGETS_DEFAULT=("" "arm-unknown-linux-musleabihf" "armv7-unknown-linux-gnue
 
 derive_arch_label() {
     local triple="${1:-}"
+    case "${triple}" in
+        arm-unknown-linux-musleabihf) echo "armv6"; return ;;
+        armv7-unknown-linux-gnueabihf) echo "armv7"; return ;;
+        aarch64-unknown-linux-gnu) echo "arm64"; return ;;
+    esac
     if [[ -n "${triple}" ]]; then
         case "${triple}" in
             *armv6*) echo "armv6" ;;
@@ -149,13 +154,51 @@ package_artifacts() {
     IFS=' ' read -r -a deb_args <<< "${deb_args_str}"
     IFS=' ' read -r -a rpm_args <<< "${rpm_args_str}"
 
+    local env_prefix=()
+    if [[ -n "${triple}" ]]; then
+        local env_var
+        env_var=$(echo "CARGO_TARGET_${triple}_STRIP" | tr '[:lower:]-' '[:upper:]_')
+        env_prefix+=("${env_var}=/bin/true")
+    fi
+
+    local strip_shim
+    strip_shim="$(mktemp -d)"
+    cat > "${strip_shim}/strip" <<'EOS'
+#!/bin/sh
+# Minimal strip shim that just copies input to requested output.
+out=""
+in=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o)
+      out="$2"
+      shift 2
+      ;;
+    *)
+      in="$1"
+      shift
+      ;;
+  esac
+done
+
+if [ -n "$out" ] && [ -n "$in" ] && [ -f "$in" ]; then
+  cp "$in" "$out"
+  exit 0
+fi
+
+# Fallback: if no -o provided, just succeed.
+exit 0
+EOS
+    chmod +x "${strip_shim}/strip"
+    local shimmed_path="${strip_shim}:$PATH"
+
     if [[ ! -f "${BIN_PATH}" ]]; then
         echo "Binary not found at ${BIN_PATH}" >&2
         exit 1
     fi
 
-    cargo deb "${deb_args[@]}"
-    cargo generate-rpm "${rpm_args[@]}"
+    env ${env_prefix[@]+"${env_prefix[@]}"} PATH="${shimmed_path}" CARGO_PROFILE_RELEASE_STRIP=false cargo deb "${deb_args[@]}"
+    env ${env_prefix[@]+"${env_prefix[@]}"} PATH="${shimmed_path}" CARGO_PROFILE_RELEASE_STRIP=false cargo generate-rpm "${rpm_args[@]}"
 
     local DEB_PATH
     local RPM_PATH

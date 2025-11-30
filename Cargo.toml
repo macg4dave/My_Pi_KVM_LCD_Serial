@@ -26,7 +26,7 @@ rppal = { version = "0.22.1", features = ["hal"] }
 linux-embedded-hal = "0.4.1"
 
 [package.metadata.deb]
-maintainer = "SerialLCD Maintainers <maintainers@example.invalid>"
+maintainer = "David <macg4dave@gmail.com>"
 depends = "libudev1, systemd"
 assets = [
     ["target/release/seriallcd", "/usr/bin/seriallcd", "755"],
@@ -36,7 +36,6 @@ assets = [
 maintainer-scripts = "packaging/deb"
 
 [package.metadata.generate-rpm]
-requires = ["systemd"]
 assets = [
     { source = "target/release/seriallcd", dest = "/usr/bin/seriallcd", mode = "755" },
     { source = "seriallcd.service", dest = "/usr/lib/systemd/system/seriallcd.service", mode = "644" },
@@ -48,3 +47,6 @@ systemctl daemon-reload >/dev/null 2>&1 || true
 post_uninstall_script = """
 systemctl daemon-reload >/dev/null 2>&1 || true
 """
+
+[package.metadata.generate-rpm.requires]
+systemd = "*"

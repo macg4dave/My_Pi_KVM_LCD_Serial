@@ -7,6 +7,7 @@ and installs both the binary and the `seriallcd.service` unit file.
 
 - Rust toolchain with `cargo`
 - Packaging helpers: `cargo install cargo-deb cargo-generate-rpm`
+- Docker with BuildKit/buildx (used for armv6/armv7/arm64 cross builds)
 - System tools: `dpkg-dev` (for Debian/Ubuntu), `rpm-build` (for Fedora/RHEL), `systemd`
 - Optional: GitHub CLI (`gh`) with `GH_TOKEN` configured for uploads
 
@@ -32,7 +33,8 @@ commands above, and ensure the appropriate cross toolchain is installed.
 ## Helper script for repeatable local releases
 
 `scripts/local-release.sh` wraps the steps above, copies artifacts into `releases/<version>/`,
-and can optionally publish them to GitHub Releases.
+renames them with a predictable `seriallcd_v<version>_<arch>` pattern, and can optionally publish
+them to GitHub Releases.
 
 Examples:
 
@@ -45,9 +47,24 @@ scripts/local-release.sh --target armv7-unknown-linux-gnueabihf --upload
 ```
 
 Script flags:
-- `--target <triple>`: cross-compile/pack for another target
+- `--target <triple>`: cross-compile/pack for another target (can be repeated)
+- `--targets <t1,t2>`: comma-separated list of targets
+- `--all-targets`: build host + armv6 + armv7 + arm64. The predefined set uses Docker Buildx for the ARM targets, so you don't need local cross toolchains.
 - `--tag <git-tag>`: override the release tag (default: `v<Cargo version>`)
 - `--upload`: create/update the GitHub release with the generated artifacts
+- `--all`: convenience alias for `--upload` (build + package + upload in one go)
+
+Outputs in `releases/<version>/` are named like:
+- `seriallcd_v0.5_armv6` (raw binary)
+- `seriallcd_v0.5_armv6.deb`
+- `seriallcd_v0.5_armv6.rpm`
+
+Note: Cross targets must be installed and have working linkers. For example:
+
+```sh
+# Only needed if you build cross-arch outside Docker
+rustup target add arm-unknown-linux-musleabihf armv7-unknown-linux-gnueabihf aarch64-unknown-linux-gnu
+```
 
 ## Publishing a GitHub release manually
 
