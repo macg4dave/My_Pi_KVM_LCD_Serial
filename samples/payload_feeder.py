@@ -32,8 +32,6 @@ def build_frames() -> List[Dict[str, Any]]:
             "line1": "CPU LOAD",
             "bar_value": 730,
             "bar_max": 1000,
-            "bar_label": "MEM",
-            "bar_line2": True,
             "page_timeout_ms": 10000,
         },
         {
@@ -51,8 +49,6 @@ def build_frames() -> List[Dict[str, Any]]:
         {
             "line1": "Clear + Test Pattern",
             "line2": "Ensure wiring is OK",
-            "clear": True,
-            "test": True,
             "page_timeout_ms": 4000,
         },
     ]
