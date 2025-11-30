@@ -13,8 +13,10 @@ async-serial = ["tokio-serial", "tokio"]
 
 [dependencies]
 hd44780-driver = "0.4"
-linux-embedded-hal = "0.6"
-rppal = { version = "0.17", features = ["i2c"] }
 serialport = "4.3"
 tokio-serial = { version = "5.4", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rppal = { version = "0.22.1", features = ["hal"] }
+linux-embedded-hal = "0.4.1"

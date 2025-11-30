@@ -27,20 +27,19 @@ No TUI. No REPL. No HTTP server. No GUI.
 IO/protocols:
 Input: UART serial (/dev/ttyAMA0, 115200 baud)
 Output: 16×2 character LCD via I²C (PCF8574, address 0x27)
-No network.
 No Wi-Fi, no Bluetooth, no sockets, no cloud.
 No USB HID.
 
 Storage/config:
 Only local config files under ~/.serial_lcd/
-Files: config.toml, optional local log
+Files: config.toml (read/write allowed — this is the only persistent write exception), optional local log (ramdisk only)
 No database.
 No cache.
 No state outside this folder.
 
 ## Runtime RAM-disk / cache policy (MANDATORY)
 
-The program must never write to the SD card or persistent storage.
+The program must never write to the SD card or persistent storage, **except** the single config file at `~/.serial_lcd/config.toml` on the Raspberry Pi.
 
 All temporary files, logs, and caches must be stored in a RAM-disk
 created and owned by systemd, not by the application.
@@ -58,11 +57,12 @@ Systemd will provision a private tmpfs at:
 This directory will exist at runtime and will be owned by the service user.
 The application may:
 - read/write files inside `/run/serial_lcd_cache`
+- read/write the config file at `~/.serial_lcd/config.toml` (the only persistent exception)
 - assume ~100MB of tmpfs space
 - clean up its own temporary files
 
 The application must not:
-- write anywhere else
+- write anywhere else (persistent writes are only for the config file)
 - attempt to remount or resize the tmpfs
 - assume permanence (all data is wiped on reboot)
 
@@ -118,4 +118,3 @@ Details:
 
 ## development machine
 Target platform is Raspberry Pi 1 Model A (ARMv6) BCM2835. Development can occur on an x86_64 Linux or macOS machine using cross-compilation or QEMU emulation docker. Ensure all builds and tests pass on the target ARMv6 architecture before finalizing changes.
-

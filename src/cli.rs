@@ -1,23 +1,12 @@
 use crate::{Error, Result};
 
-/// Options for the `run` command.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Options for the `run` command; values are `None` when not provided on CLI.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RunOptions {
-    pub device: String,
-    pub baud: u32,
-    pub cols: u8,
-    pub rows: u8,
-}
-
-impl Default for RunOptions {
-    fn default() -> Self {
-        Self {
-            device: "/dev/ttyAMA0".to_string(),
-            baud: 115_200,
-            cols: 20,
-            rows: 4,
-        }
-    }
+    pub device: Option<String>,
+    pub baud: Option<u32>,
+    pub cols: Option<u8>,
+    pub rows: Option<u8>,
 }
 
 /// Parsed command-line intent.
@@ -79,25 +68,28 @@ fn parse_run_options(iter: &mut std::slice::Iter<String>) -> Result<RunOptions> 
     while let Some(flag) = iter.next() {
         match flag.as_str() {
             "--device" => {
-                opts.device = take_value(flag, iter)?;
+                opts.device = Some(take_value(flag, iter)?);
             }
             "--baud" => {
                 let raw = take_value(flag, iter)?;
-                opts.baud = raw.parse().map_err(|_| {
-                    Error::InvalidArgs("baud must be a positive integer".to_string())
-                })?;
+                opts.baud = Some(
+                    raw.parse()
+                        .map_err(|_| Error::InvalidArgs("baud must be a positive integer".to_string()))?,
+                );
             }
             "--cols" => {
                 let raw = take_value(flag, iter)?;
-                opts.cols = raw.parse().map_err(|_| {
-                    Error::InvalidArgs("cols must be a positive integer".to_string())
-                })?;
+                opts.cols = Some(
+                    raw.parse()
+                        .map_err(|_| Error::InvalidArgs("cols must be a positive integer".to_string()))?,
+                );
             }
             "--rows" => {
                 let raw = take_value(flag, iter)?;
-                opts.rows = raw.parse().map_err(|_| {
-                    Error::InvalidArgs("rows must be a positive integer".to_string())
-                })?;
+                opts.rows = Some(
+                    raw.parse()
+                        .map_err(|_| Error::InvalidArgs("rows must be a positive integer".to_string()))?,
+                );
             }
             other => {
                 return Err(Error::InvalidArgs(format!(
@@ -141,10 +133,10 @@ mod tests {
             "2".into(),
         ];
         let expected = RunOptions {
-            device: "/dev/ttyUSB0".into(),
-            baud: 9600,
-            cols: 16,
-            rows: 2,
+            device: Some("/dev/ttyUSB0".into()),
+            baud: Some(9600),
+            cols: Some(16),
+            rows: Some(2),
         };
         let cmd = Command::parse(&args).unwrap();
         assert_eq!(cmd, Command::Run(expected));

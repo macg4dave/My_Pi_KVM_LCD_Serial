@@ -26,6 +26,16 @@ cargo build
 cargo run -- run --device /dev/ttyUSB0 --baud 9600 --cols 16 --rows 2
 ```
 
+### Config file
+Persistent settings live at `~/.serial_lcd/config.toml` and use a simple `key = value` format:
+```toml
+device = "/dev/ttyAMA0"
+baud = 115200
+cols = 20
+rows = 4
+```
+CLI flags override config values when provided.
+
 ## Dependencies (allowed)
 - `hd44780-driver` for the LCD controller.
 - `linux-embedded-hal` and `rppal` for Raspberry Pi I²C/hal support.

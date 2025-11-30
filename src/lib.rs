@@ -1,6 +1,8 @@
 pub mod app;
 pub mod cli;
+pub mod config;
 pub mod lcd;
+pub mod lcd_driver;
 pub mod serial;
 
 pub type Result<T> = std::result::Result<T, Error>;

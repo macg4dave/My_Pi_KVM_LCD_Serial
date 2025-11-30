@@ -20,7 +20,7 @@ fn try_main() -> Result<()> {
             Ok(())
         }
         Ok(Command::Run(opts)) => {
-            let app = App::from_options(opts);
+            let app = App::from_options(opts)?;
             app.run()
         }
         Err(err) => {
