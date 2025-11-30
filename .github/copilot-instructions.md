@@ -79,22 +79,22 @@ No persistent state must ever be created.
 * No speculative features or refactors without a written request.
 
 ## Tech and dependencies
-* Language: Rust (stable). Edition: TODO (2021/2024).
-* Allowed crates: TODO (list permitted crates; default to std + <common choices>).
-* Banned crates: TODO (if any).
+* Language: Rust (stable). Edition: 2021.
+* Allowed crates: std, hd44780-driver, linux-embedded-hal, rppal (I2C), serialport, tokio-serial (feature `async-serial`), tokio (only for async serial), anyhow/thiserror/log/tracing once requested explicitly.
+* Banned crates: anything that pulls in a runtime or network stack unless explicitly requested (no reqwest, hyper, surf, mqtt, websockets, databases).
 * Build/test commands: `cargo build`, `cargo test`; optionally `cargo fmt`, `cargo clippy`.
-* Runtime environment: TODO (OS/hardware assumptions, serial device paths, etc.).
+* Runtime environment: Raspberry Pi OS on ARMv6 (Pi 1), systemd-managed service user, serial at `/dev/ttyAMA0` (115200 8N1), I2C LCD at address `0x27` via PCF8574.
 
 ## Interfaces that must stay stable
-* CLI binary name and flags: TODO (enumerate).
-* Config/schema/contracts: TODO (file format, env vars, serial protocol framing).
-* Outputs: TODO (log formats, exit codes, user-visible text that must not change).
+* CLI binary name and flags: `seriallcd --run`, `--test-lcd`, `--test-serial`, plus `--device`, `--baud`, `--cols`, `--rows`. Do not rename without approval.
+* Config/schema/contracts: `~/.serial_lcd/config.toml` (future), serial framing: newline-terminated JSON or `key=value` records; I2C LCD uses HD44780 command set via PCF8574.
+* Outputs: stderr logging only; LCD contents are two-line text; exit codes: 0 on success, non-zero on fatal errors.
 
 ## Quality bar
 * Tests: every behavioral change adds/updates tests; no regressions.
 * Formatting/lints: `rustfmt`; `clippy` must be clean or documented if skipped.
 * Safety: avoid `unsafe`; avoid `unwrap()` outside tests/examples unless justified.
-* Performance/reliability: TODO (budgets, retry rules, timeouts if relevant).
+* Performance/reliability: target <5 MB RSS; avoid busy loops; handle serial/LCD errors with retries and backoff; never crash the daemon loop.
 
 ## Task request template (use for every ask)
 Task:
@@ -115,3 +115,7 @@ Details:
 - Add or update tests for behavior changes and include `cargo test` output.
 - Document user-facing changes (Rustdoc/README) when behavior shifts.
 - No feature creep: do not add capabilities not listed in "In-scope MVP."
+
+## development machine
+Target platform is Raspberry Pi 1 Model A (ARMv6) BCM2835. Development can occur on an x86_64 Linux or macOS machine using cross-compilation or QEMU emulation docker. Ensure all builds and tests pass on the target ARMv6 architecture before finalizing changes.
+

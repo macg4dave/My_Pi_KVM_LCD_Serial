@@ -1,0 +1,20 @@
+[package]
+name = "seriallcd"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Serial-to-LCD daemon for Raspberry Pi / PiKVM targets (skeleton)."
+repository = ""
+
+[features]
+default = []
+# Enable async serial when needed; off by default for minimal footprint.
+async-serial = ["tokio-serial", "tokio"]
+
+[dependencies]
+hd44780-driver = "0.4"
+linux-embedded-hal = "0.6"
+rppal = { version = "0.17", features = ["i2c"] }
+serialport = "4.3"
+tokio-serial = { version = "5.4", optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }

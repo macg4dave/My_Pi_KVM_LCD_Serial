@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1.6
+
+# Cross-build Rust binary for Raspberry Pi 1 (BCM2835, ARMv6, 32-bit).
+ARG RUST_VERSION=1
+FROM --platform=$BUILDPLATFORM rust:${RUST_VERSION}-bookworm AS builder
+
+ARG TARGET=arm-unknown-linux-gnueabihf
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN dpkg --add-architecture armhf \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        gcc-arm-linux-gnueabihf \
+        libc6-dev-armhf-cross \
+        pkg-config \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN rustup target add ${TARGET}
+
+ENV CARGO_TARGET_ARM_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc
+ENV CC_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc
+ENV CXX_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-g++
+ENV PKG_CONFIG_ALLOW_CROSS=1
+ENV RUSTFLAGS="-C target-cpu=arm1176jzf-s -C target-feature=+vfp2"
+
+WORKDIR /app
+COPY . .
+
+# Cache cargo downloads and build artifacts to speed up rebuilds.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --target=${TARGET}
+
+# Runtime image: tiny Debian arm/v6 with the compiled binary.
+FROM --platform=linux/arm/v6 debian:bookworm-slim AS runtime
+ARG TARGET=arm-unknown-linux-gnueabihf
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libgcc-s1:armhf \
+        libstdc++6:armhf \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/target/${TARGET}/release/seriallcd /usr/local/bin/seriallcd
+
+USER 1000:1000
+ENTRYPOINT ["/usr/local/bin/seriallcd"]
+CMD ["--run"]
