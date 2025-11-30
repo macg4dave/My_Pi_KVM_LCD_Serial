@@ -33,24 +33,24 @@ pub(super) fn run_render_loop(
     config: &mut AppConfig,
     logger: &Logger,
     mut backoff: BackoffController,
-    mut port: Option<SerialPort>,
+    mut serial_connection: Option<SerialPort>,
 ) -> Result<()> {
     let mut state = crate::state::RenderState::new(Some(PayloadDefaults {
         scroll_speed_ms: config.scroll_speed_ms,
         page_timeout_ms: config.page_timeout_ms,
     }));
-    let mut buffer = String::new();
+    let mut incoming_line = String::new();
     let mut last_render = Instant::now();
     let min_render_interval = Duration::from_millis(200);
     let mut current_frame: Option<RenderFrame> = None;
     let mut next_page = Instant::now();
     let mut next_scroll = Instant::now();
     let mut scroll_offsets = ScrollOffsets::zero();
-    let mut button = Button::new(config.button_gpio_pin).ok();
+    let mut button_input = Button::new(config.button_gpio_pin).ok();
     let mut backlight_state = true;
     let blink_interval = Duration::from_millis(500);
     let mut next_blink = Instant::now();
-    let mut reconnect_displayed = port.is_none();
+    let mut reconnect_displayed = serial_connection.is_none();
     let mut last_frame_at = Instant::now();
     let heartbeat_grace = Duration::from_millis(HEARTBEAT_GRACE_MS);
     let mut heartbeat_visible = false;
@@ -63,27 +63,31 @@ pub(super) fn run_render_loop(
     let running: Arc<AtomicBool> = create_shutdown_flag()?;
 
     while running.load(Ordering::SeqCst) {
-        let now = Instant::now();
-        let heartbeat_active = now.duration_since(last_frame_at) >= heartbeat_grace;
-        if heartbeat_active && now >= next_heartbeat {
+        // Track heartbeat visibility when frames stop arriving for a grace period.
+        let current_time = Instant::now();
+        let heartbeat_active =
+            current_time.duration_since(last_frame_at) >= heartbeat_grace;
+        if heartbeat_active && current_time >= next_heartbeat {
             heartbeat_visible = !heartbeat_visible;
-            next_heartbeat = now + Duration::from_millis(HEARTBEAT_BLINK_MS);
+            next_heartbeat = current_time + Duration::from_millis(HEARTBEAT_BLINK_MS);
         } else if !heartbeat_active {
             heartbeat_visible = false;
-            next_heartbeat = now + Duration::from_millis(HEARTBEAT_BLINK_MS);
+            next_heartbeat = current_time + Duration::from_millis(HEARTBEAT_BLINK_MS);
         }
         let heartbeat_on = heartbeat_active && heartbeat_visible;
 
-        if let Some(btn) = button.as_mut() {
-            if btn.is_pressed() {
+        // Manual page advance via GPIO button when configured.
+        if let Some(button) = button_input.as_mut() {
+            if button.is_pressed() {
                 if let Some(frame) = state.next_page() {
                     current_frame = Some(frame);
                     scroll_offsets = ScrollOffsets::zero();
-                    next_scroll =
-                        now + Duration::from_millis(config.scroll_speed_ms);
+                    next_scroll = current_time
+                        + Duration::from_millis(config.scroll_speed_ms);
                     lcd.clear()?;
                     if let Some(frame) = current_frame.as_ref() {
-                        next_page = now + Duration::from_millis(frame.page_timeout_ms);
+                        next_page = current_time
+                            + Duration::from_millis(frame.page_timeout_ms);
                         render_if_allowed(
                             lcd,
                             frame,
@@ -97,29 +101,35 @@ pub(super) fn run_render_loop(
             }
         }
 
-        if port.is_none() && !reconnect_displayed {
+        // Show reconnect status as soon as we know the serial link is gone.
+        if serial_connection.is_none() && !reconnect_displayed {
             render_reconnecting(lcd, config.cols)?;
             reconnect_displayed = true;
         }
 
-        if port.is_none() && backoff.should_retry(now) {
-            match attempt_serial_connect(logger, &config.device, config.baud) {
+        // Attempt reconnect when backoff allows; reset indicators on success.
+        if serial_connection.is_none() && backoff.should_retry(current_time) {
+            match attempt_serial_connect(logger, &config.device, config.baud)
+            {
                 Some(p) => {
-                    port = Some(p);
-                    backoff.mark_success(now);
+                    serial_connection = Some(p);
+                    backoff.mark_success(current_time);
                     reconnect_displayed = false;
                     heartbeat_visible = false;
                 }
-                None => backoff.mark_failure(now),
+                None => backoff.mark_failure(current_time),
             }
         }
 
-        if let Some(port_ref) = port.as_mut() {
-            buffer.clear();
-            match port_ref.read_message_line(&mut buffer) {
+        // Read the next frame from serial; handle config reloads or parse failures.
+        if let Some(serial_connection_ref) = serial_connection.as_mut() {
+            incoming_line.clear();
+            match serial_connection_ref.read_message_line(&mut incoming_line) {
                 Ok(read) => {
                     if read > 0 {
-                        let line = buffer.trim_end_matches(&['\r', '\n'][..]).trim();
+                        let line = incoming_line
+                            .trim_end_matches(&['\r', '\n'][..])
+                            .trim();
                         if !line.is_empty() {
                             match state.ingest(line) {
                                 Ok(Some(frame)) if frame.config_reload => {
@@ -149,18 +159,18 @@ pub(super) fn run_render_loop(
                                 Ok(Some(frame)) => {
                                     current_frame = Some(frame.clone());
                                     scroll_offsets = ScrollOffsets::zero();
-                                    next_scroll =
-                                        now + Duration::from_millis(config.scroll_speed_ms);
+                                    next_scroll = current_time
+                                        + Duration::from_millis(config.scroll_speed_ms);
                                     lcd.clear()?;
                                     backlight_state = frame.backlight_on;
                                     lcd.set_backlight(backlight_state)?;
                                     lcd.set_blink(frame.blink)?;
-                                    next_blink = now + blink_interval;
-                                    last_frame_at = now;
+                                    next_blink = current_time + blink_interval;
+                                    last_frame_at = current_time;
                                     heartbeat_visible = false;
                                     if let Some(frame) = current_frame.as_ref() {
-                                        next_page =
-                                            now + Duration::from_millis(frame.page_timeout_ms);
+                                        next_page = current_time
+                                            + Duration::from_millis(frame.page_timeout_ms);
                                         render_if_allowed(
                                             lcd,
                                             frame,
@@ -176,7 +186,7 @@ pub(super) fn run_render_loop(
                                     logger.log(format!("frame error: {err}"));
                                     render_parse_error(lcd, config.cols, &err)?;
                                     backlight_state = true;
-                                    next_blink = now + blink_interval;
+                                    next_blink = current_time + blink_interval;
                                     continue;
                                 }
                             }
@@ -185,8 +195,8 @@ pub(super) fn run_render_loop(
                 }
                 Err(Error::Io(e)) => {
                     logger.log(format!("serial read error: {e}; scheduling reconnect"));
-                    port = None;
-                    backoff.mark_failure(now);
+                    serial_connection = None;
+                    backoff.mark_failure(current_time);
                     reconnect_displayed = false;
                 }
                 Err(err) => return Err(err),
@@ -195,17 +205,18 @@ pub(super) fn run_render_loop(
             thread::sleep(Duration::from_millis(50));
         }
 
-        if state.len() > 1 && now >= next_page {
+        // Rotate to the next queued frame after its page timeout.
+        if state.len() > 1 && current_time >= next_page {
             if let Some(frame) = state.next_page() {
                 current_frame = Some(frame);
                 scroll_offsets = ScrollOffsets::zero();
                 if let Some(frame) = current_frame.as_ref() {
-                    next_page = now + Duration::from_millis(frame.page_timeout_ms);
+                    next_page = current_time + Duration::from_millis(frame.page_timeout_ms);
                     lcd.clear()?;
                     backlight_state = frame.backlight_on;
                     lcd.set_backlight(backlight_state)?;
                     lcd.set_blink(frame.blink)?;
-                    next_blink = now + blink_interval;
+                    next_blink = current_time + blink_interval;
                     render_if_allowed(
                         lcd,
                         frame,
@@ -227,13 +238,14 @@ pub(super) fn run_render_loop(
                     && (line_needs_scroll(&frame.line1, width)
                         || line_needs_scroll(&frame.line2, width)),
             };
-            if needs_scroll && now >= next_scroll {
+            // Scroll long lines forward when allowed by the frame.
+            if needs_scroll && current_time >= next_scroll {
                 scroll_offsets = scroll_offsets.update(
                     advance_offset(&frame.line1, lcd.cols() as usize, scroll_offsets.top),
                     advance_offset(&frame.line2, lcd.cols() as usize, scroll_offsets.bottom),
                 );
                 next_scroll =
-                    now + Duration::from_millis(frame.scroll_speed_ms);
+                    current_time + Duration::from_millis(frame.scroll_speed_ms);
                 render_if_allowed(
                     lcd,
                     frame,
@@ -245,10 +257,11 @@ pub(super) fn run_render_loop(
             }
 
             if frame.blink {
-                if now >= next_blink {
+                // Drive periodic blink by toggling backlight.
+                if current_time >= next_blink {
                     backlight_state = !backlight_state;
                     lcd.set_backlight(backlight_state)?;
-                    next_blink = now + blink_interval;
+                    next_blink = current_time + blink_interval;
                 }
             } else if backlight_state != frame.backlight_on {
                 backlight_state = frame.backlight_on;
@@ -257,6 +270,7 @@ pub(super) fn run_render_loop(
         }
     }
 
+    // Leave the display in a clean shutdown state.
     render_shutdown(lcd)?;
     logger.log("daemon exiting".into());
     Ok(())

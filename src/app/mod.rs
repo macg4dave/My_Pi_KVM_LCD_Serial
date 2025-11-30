@@ -102,9 +102,9 @@ impl App {
             return render_frame_once(&mut lcd, &frame);
         }
 
-        let port: Option<SerialPort> =
+        let serial_connection: Option<SerialPort> =
             attempt_serial_connect(&self.logger, &config.device, config.baud);
-        if port.is_none() {
+        if serial_connection.is_none() {
             let now = Instant::now();
             backoff.mark_failure(now);
             render_reconnecting(&mut lcd, config.cols)?;
@@ -115,7 +115,7 @@ impl App {
             &mut config,
             &self.logger,
             backoff,
-            port,
+            serial_connection,
         )
     }
 }

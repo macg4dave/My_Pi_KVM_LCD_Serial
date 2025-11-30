@@ -46,8 +46,8 @@ impl SerialPort {
     }
 
     /// Read a single newline-terminated message. Returns 0 on timeout.
-    pub fn read_message_line(&mut self, buf: &mut String) -> Result<usize> {
-        buf.clear();
+    pub fn read_message_line(&mut self, line_buffer: &mut String) -> Result<usize> {
+        line_buffer.clear();
         let port = self
             .port
             .as_deref_mut()
@@ -55,6 +55,7 @@ impl SerialPort {
 
         let mut byte = [0u8; 1];
         let mut total = 0;
+        // Read byte-by-byte until newline while enforcing a size guard.
         loop {
             match port.read(&mut byte) {
                 Ok(0) => return Ok(total),
@@ -76,7 +77,7 @@ impl SerialPort {
                         return Ok(total);
                     }
                     if b != b'\r' {
-                        buf.push(b as char);
+                        line_buffer.push(b as char);
                     }
                 }
                 Err(e) if e.kind() == io::ErrorKind::TimedOut => return Ok(0),

@@ -84,6 +84,7 @@ impl RenderState {
     }
 
     fn prune_expired(&mut self, now: Instant) {
+        // Drop expired frames so the queue reflects currently valid pages and CRC dedupe can reset.
         while let Some(front) = self.pages.front() {
             if let Some(expiry) = front.expires_at {
                 if expiry <= now {
