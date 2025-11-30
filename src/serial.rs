@@ -1,4 +1,4 @@
-use crate::{Error, Result};
+use crate::{state::MAX_FRAME_BYTES, Error, Result};
 use std::io;
 
 /// Lightweight serial placeholder. Replace with a real transport later.
@@ -57,6 +57,17 @@ impl SerialPort {
                 Ok(0) => return Ok(total),
                 Ok(_) => {
                     total += 1;
+                    if total > MAX_FRAME_BYTES {
+                        // Drain until newline to avoid contaminating the next frame.
+                        while let Ok(_) = port.read(&mut byte) {
+                            if byte[0] == b'\n' {
+                                break;
+                            }
+                        }
+                        return Err(Error::Parse(format!(
+                            "frame exceeds {MAX_FRAME_BYTES} bytes"
+                        )));
+                    }
                     let b = byte[0];
                     if b == b'\n' {
                         return Ok(total);

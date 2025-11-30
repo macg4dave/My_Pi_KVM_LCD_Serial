@@ -120,6 +120,12 @@ impl Lcd {
         }
     }
 
+    /// Convenience to write both lines back-to-back to reduce flicker.
+    pub fn write_lines(&mut self, line1: &str, line2: &str) -> Result<()> {
+        self.write_line(0, line1)?;
+        self.write_line(1, line2)
+    }
+
     pub fn cols(&self) -> u8 {
         self.cols
     }

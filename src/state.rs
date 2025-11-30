@@ -79,6 +79,10 @@ impl RenderState {
         self.pages.len()
     }
 
+    pub fn set_defaults(&mut self, defaults: Defaults) {
+        self.defaults = defaults;
+    }
+
     fn prune_expired(&mut self, now: Instant) {
         while let Some(front) = self.pages.front() {
             if let Some(expiry) = front.expires_at {

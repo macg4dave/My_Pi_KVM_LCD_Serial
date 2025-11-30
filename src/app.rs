@@ -8,7 +8,8 @@ use crate::{
     serial::SerialPort,
     Error, Result,
 };
-use std::{fs, thread, time::{Duration, Instant}};
+use std::{fs, io::Write, thread, time::{Duration, Instant}};
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 const SCROLL_GAP: &str = "    |    ";
 const HEARTBEAT_GRACE_MS: u64 = 5_000;
@@ -49,11 +50,15 @@ impl Default for AppConfig {
 
 pub struct App {
     config: AppConfig,
+    logger: Logger,
 }
 
 impl App {
     pub fn new(config: AppConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            logger: Logger::new(),
+        }
     }
 
     pub fn from_options(opts: RunOptions) -> Result<Self> {
@@ -64,26 +69,31 @@ impl App {
 
     /// Entry point for the daemon. Wire up serial + LCD here.
     pub fn run(&self) -> Result<()> {
+        let mut config = self.config.clone();
         let mut lcd = Lcd::new(
-            self.config.cols,
-            self.config.rows,
-            self.config.pcf8574_addr.clone(),
+            config.cols,
+            config.rows,
+            config.pcf8574_addr.clone(),
         )?;
         lcd.render_boot_message()?;
+        self.logger.log(format!(
+            "daemon start (device={}, baud={}, cols={}, rows={})",
+            config.device, config.baud, config.cols, config.rows
+        ));
 
         let mut backoff =
-            Duration::from_millis(self.config.backoff_initial_ms.max(1));
-        let max_backoff = Duration::from_millis(
-            self.config
+            Duration::from_millis(config.backoff_initial_ms.max(1));
+        let mut max_backoff = Duration::from_millis(
+            config
                 .backoff_max_ms
-                .max(self.config.backoff_initial_ms.max(1)),
+                .max(config.backoff_initial_ms.max(1)),
         );
         let mut next_retry = Instant::now();
 
-        if let Some(path) = &self.config.payload_file {
+        if let Some(path) = &config.payload_file {
             let defaults = PayloadDefaults {
-                scroll_speed_ms: self.config.scroll_speed_ms,
-                page_timeout_ms: self.config.page_timeout_ms,
+                scroll_speed_ms: config.scroll_speed_ms,
+                page_timeout_ms: config.page_timeout_ms,
             };
             let frame = load_payload_from_file(path, defaults)?;
             lcd.set_backlight(frame.backlight_on)?;
@@ -92,28 +102,30 @@ impl App {
         }
 
         let mut port: Option<SerialPort> =
-            match SerialPort::connect(&self.config.device, self.config.baud) {
+            match SerialPort::connect(&config.device, config.baud) {
                 Ok(mut p) => {
                     if let Err(err) = p.send_line("INIT") {
-                        eprintln!("serial init failed: {err}; will retry");
+                        self.logger.log(format!("serial init failed: {err}; will retry"));
                         None
                     } else {
+                        self.logger.log("serial connected".into());
                         Some(p)
                     }
                 }
                 Err(err) => {
-                    eprintln!("serial connect failed: {err}; will retry");
+                    self.logger
+                        .log(format!("serial connect failed: {err}; will retry"));
                     None
                 }
             };
         if port.is_none() {
             next_retry = Instant::now() + backoff;
-            render_reconnecting(&mut lcd, self.config.cols)?;
+            render_reconnecting(&mut lcd, config.cols)?;
         }
 
         let mut state = crate::state::RenderState::new(Some(PayloadDefaults {
-            scroll_speed_ms: self.config.scroll_speed_ms,
-            page_timeout_ms: self.config.page_timeout_ms,
+            scroll_speed_ms: config.scroll_speed_ms,
+            page_timeout_ms: config.page_timeout_ms,
         }));
         let mut buffer = String::new();
         let mut last_render = Instant::now();
@@ -122,7 +134,7 @@ impl App {
         let mut next_page = Instant::now();
         let mut next_scroll = Instant::now();
         let mut scroll_offsets = (0usize, 0usize);
-        let mut button = Button::new(self.config.button_gpio_pin).ok();
+        let mut button = Button::new(config.button_gpio_pin).ok();
         let mut backlight_state = true;
         let blink_interval = Duration::from_millis(500);
         let mut next_blink = Instant::now();
@@ -132,7 +144,16 @@ impl App {
         let mut heartbeat_visible = false;
         let mut next_heartbeat = Instant::now() + Duration::from_millis(HEARTBEAT_BLINK_MS);
 
-        loop {
+        let running = Arc::new(AtomicBool::new(true));
+        {
+            let running = running.clone();
+            ctrlc::set_handler(move || {
+                running.store(false, Ordering::SeqCst);
+            })
+            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        }
+
+        while running.load(Ordering::SeqCst) {
             let now = Instant::now();
             let heartbeat_active = now.duration_since(last_frame_at) >= heartbeat_grace;
             if heartbeat_active && now >= next_heartbeat {
@@ -150,7 +171,7 @@ impl App {
                         current_frame = Some(frame);
                         scroll_offsets = (0, 0);
                         next_scroll =
-                            now + Duration::from_millis(self.config.scroll_speed_ms);
+                            now + Duration::from_millis(config.scroll_speed_ms);
                         lcd.clear()?;
                         if let Some(frame) = current_frame.as_ref() {
                             next_page = now + Duration::from_millis(frame.page_timeout_ms);
@@ -168,29 +189,30 @@ impl App {
             }
 
             if port.is_none() && !reconnect_displayed {
-                render_reconnecting(&mut lcd, self.config.cols)?;
+                render_reconnecting(&mut lcd, config.cols)?;
                 reconnect_displayed = true;
             }
 
             if port.is_none() && now >= next_retry {
-                    match SerialPort::connect(&self.config.device, self.config.baud) {
-                        Ok(mut p) => {
-                            if let Err(err) = p.send_line("INIT") {
-                                eprintln!("serial init failed: {err}; will retry");
-                                next_retry = now + backoff;
-                                backoff = (backoff * 2).min(max_backoff);
-                            } else {
-                                port = Some(p);
-                                backoff = Duration::from_millis(
-                                    self.config.backoff_initial_ms.max(1)
-                                );
-                                reconnect_displayed = false;
-                                heartbeat_visible = false;
-                            }
-                        }
-                        Err(err) => {
-                            eprintln!("serial reconnect failed: {err}; will retry");
+                match SerialPort::connect(&config.device, config.baud) {
+                    Ok(mut p) => {
+                        if let Err(err) = p.send_line("INIT") {
+                            self.logger.log(format!("serial init failed: {err}; will retry"));
                             next_retry = now + backoff;
+                            backoff = (backoff * 2).min(max_backoff);
+                        } else {
+                            port = Some(p);
+                            backoff = Duration::from_millis(
+                                config.backoff_initial_ms.max(1)
+                            );
+                            reconnect_displayed = false;
+                            heartbeat_visible = false;
+                            self.logger.log("serial connected".into());
+                        }
+                    }
+                    Err(err) => {
+                        self.logger.log(format!("serial reconnect failed: {err}; will retry"));
+                        next_retry = now + backoff;
                         backoff = (backoff * 2).min(max_backoff);
                     }
                 }
@@ -204,11 +226,40 @@ impl App {
                             let line = buffer.trim_end_matches(&['\r', '\n'][..]).trim();
                             if !line.is_empty() {
                                 match state.ingest(line) {
+                                    Ok(Some(frame)) if frame.config_reload => {
+                                        self.logger.log("config reload requested".into());
+                                        match Config::load_or_default() {
+                                            Ok(new_cfg) => {
+                                                config.scroll_speed_ms = new_cfg.scroll_speed_ms;
+                                                config.page_timeout_ms = new_cfg.page_timeout_ms;
+                                                config.backoff_initial_ms =
+                                                    new_cfg.backoff_initial_ms;
+                                                config.backoff_max_ms = new_cfg.backoff_max_ms;
+                                                backoff = Duration::from_millis(
+                                                    config.backoff_initial_ms.max(1),
+                                                );
+                                                max_backoff = Duration::from_millis(
+                                                    config
+                                                        .backoff_max_ms
+                                                        .max(config.backoff_initial_ms.max(1)),
+                                                );
+                                                state.set_defaults(PayloadDefaults {
+                                                    scroll_speed_ms: config.scroll_speed_ms,
+                                                    page_timeout_ms: config.page_timeout_ms,
+                                                });
+                                                self.logger.log("config reload applied".into());
+                                            }
+                                            Err(err) => {
+                                                self.logger
+                                                    .log(format!("config reload failed: {err}"));
+                                            }
+                                        }
+                                    }
                                     Ok(Some(frame)) => {
                                         current_frame = Some(frame.clone());
                                         scroll_offsets = (0, 0);
                                         next_scroll =
-                                            now + Duration::from_millis(self.config.scroll_speed_ms);
+                                            now + Duration::from_millis(config.scroll_speed_ms);
                                         lcd.clear()?;
                                         backlight_state = frame.backlight_on;
                                         lcd.set_backlight(backlight_state)?;
@@ -231,8 +282,8 @@ impl App {
                                     }
                                     Ok(None) => { /* duplicate */ }
                                     Err(err) => {
-                                        eprintln!("frame error: {err}");
-                                        render_parse_error(&mut lcd, self.config.cols, &err)?;
+                                        self.logger.log(format!("frame error: {err}"));
+                                        render_parse_error(&mut lcd, config.cols, &err)?;
                                         backlight_state = true;
                                         next_blink = now + blink_interval;
                                         continue;
@@ -242,7 +293,7 @@ impl App {
                         }
                     }
                     Err(Error::Io(e)) => {
-                        eprintln!("serial read error: {e}; scheduling reconnect");
+                        self.logger.log(format!("serial read error: {e}; scheduling reconnect"));
                         port = None;
                         next_retry = now + backoff;
                         backoff = (backoff * 2).min(max_backoff);
@@ -315,6 +366,10 @@ impl App {
                 }
             }
         }
+
+        render_shutdown(&mut lcd)?;
+        self.logger.log("daemon exiting".into());
+        Ok(())
     }
 }
 
@@ -419,18 +474,18 @@ fn render_frame_with_scroll(
 
     overlay_icons(&mut line1, &mut line2, width, &frame.icons, bar_row);
 
-    if line1.trim().is_empty() && bar_row != Some(0) {
-        lcd.write_line(0, "")?;
+    let out1 = if line1.trim().is_empty() && bar_row != Some(0) {
+        ""
     } else {
-        lcd.write_line(0, &line1)?;
-    }
+        &line1
+    };
+    let out2 = if line2.trim().is_empty() && bar_row != Some(1) {
+        ""
+    } else {
+        &line2
+    };
 
-    if line2.trim().is_empty() && bar_row != Some(1) {
-        lcd.write_line(1, "")?;
-    } else {
-        lcd.write_line(1, &line2)?;
-    }
-    Ok(())
+    lcd.write_lines(out1, out2)
 }
 
 fn line_needs_scroll(text: &str, width: usize) -> bool {
@@ -551,6 +606,41 @@ fn render_reconnecting(lcd: &mut Lcd, cols: u8) -> Result<()> {
     lcd.write_line(0, &title)?;
     lcd.write_line(1, &detail)?;
     Ok(())
+}
+
+fn render_shutdown(lcd: &mut Lcd) -> Result<()> {
+    lcd.clear()?;
+    lcd.set_blink(false)?;
+    lcd.write_line(0, "offline")?;
+    lcd.write_line(1, "")?;
+    Ok(())
+}
+
+struct Logger {
+    file: Option<std::fs::File>,
+}
+
+impl Logger {
+    fn new() -> Self {
+        let path = std::env::var("SERIALLCD_LOG_PATH").ok();
+        let file = path.and_then(|p| {
+            fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(p)
+                .ok()
+        });
+        Self { file }
+    }
+
+    fn log(&self, msg: String) {
+        eprintln!("{msg}");
+        if let Some(file) = self.file.as_ref() {
+            if let Ok(mut clone) = file.try_clone() {
+                let _ = writeln!(clone, "{msg}");
+            }
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]

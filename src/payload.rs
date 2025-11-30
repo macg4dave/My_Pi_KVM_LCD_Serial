@@ -54,6 +54,8 @@ pub struct Payload {
     pub icons: Option<Vec<String>>,
     #[serde(default)]
     pub checksum: Option<String>,
+    #[serde(default)]
+    pub config_reload: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,6 +89,7 @@ pub struct RenderFrame {
     pub test: bool,
     pub mode: DisplayMode,
     pub icons: Vec<Icon>,
+    pub config_reload: bool,
 }
 
 impl RenderFrame {
@@ -203,6 +206,7 @@ impl RenderFrame {
             test: payload.test.unwrap_or(false),
             mode,
             icons,
+            config_reload: payload.config_reload.unwrap_or(false),
         }
     }
 }
@@ -282,6 +286,7 @@ mod tests {
             mode: None,
             icons: None,
             checksum: None,
+            config_reload: None,
         };
         let mut hasher = Hasher::new();
         let canonical = serde_json::to_vec(&payload).unwrap();

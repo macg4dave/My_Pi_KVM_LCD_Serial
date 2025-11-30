@@ -6,6 +6,8 @@ pub mod lcd_driver;
 pub mod payload;
 pub mod state;
 pub mod serial;
+#[cfg(feature = "async-serial")]
+pub mod serial_async;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
