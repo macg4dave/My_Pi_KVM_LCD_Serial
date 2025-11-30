@@ -15,7 +15,6 @@
         "line1": "ALERT: Temp",
         "line2": "85C",
         "blink": true,
-        "priority": 9,
         "ttl_ms": 5000
       }
     },

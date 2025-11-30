@@ -10,17 +10,13 @@ LCD Output Features (how the screen will look)
 
 - Alerts:
   - Backlight blink.
-  - Line 1 prefixed with “ALERT:” or short message (e.g., “ALERT: Temp”).
-  - Line 2 shows detail (e.g., “85C”).
-  - TTL/priority keeps alerts visible and suppresses lower-priority updates.
+  - Line 1 prefixed with "ALERT:" or short message (e.g., "ALERT: Temp").
+  - Line 2 shows detail (e.g., "85C").
+  - TTL can keep alerts visible for a limited time.
 
 - Scrolling text:
   - Any line longer than the display auto-scrolls (marquee) at a default speed; `scroll_speed_ms` can slow/speed it.
   - If scrolling is disabled, truncate with ellipsis.
-
-- Custom icons:
-  - CGRAM slots 0–5 reserved for bar blocks, slot 6 heartbeat, slot 7 free for sibling payloads.
-  - Icons can be embedded inline via `{0xNN}` placeholders (e.g., “NET {0x00} 12.3Mbps”).
 
 - Heartbeat:
   - A tiny icon (slot 6) can pulse or toggle to show the daemon is alive even if data is stale.

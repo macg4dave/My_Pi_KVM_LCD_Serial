@@ -7,6 +7,7 @@ pub struct RunOptions {
     pub baud: Option<u32>,
     pub cols: Option<u8>,
     pub rows: Option<u8>,
+    pub payload_file: Option<String>,
 }
 
 /// Parsed command-line intent.
@@ -28,9 +29,15 @@ impl Command {
             Some("run") => Ok(Command::Run(parse_run_options(&mut iter)?)),
             Some("--help") | Some("-h") => Ok(Command::ShowHelp),
             Some("--version") | Some("-V") => Ok(Command::ShowVersion),
-            Some(flag) if flag.starts_with('-') => Err(Error::InvalidArgs(format!(
-                "unknown flag '{flag}', try --help"
-            ))),
+            Some(flag) if flag.starts_with('-') => {
+                // Allow omitting the explicit `run` subcommand: pass the consumed flag plus the
+                // remaining args into the run parser.
+                let mut flags: Vec<String> = Vec::with_capacity(args.len());
+                flags.push(flag.to_string());
+                flags.extend(iter.map(|s| s.to_string()));
+                let mut iter = flags.iter();
+                Ok(Command::Run(parse_run_options(&mut iter)?))
+            }
             Some(cmd) => Err(Error::InvalidArgs(format!(
                 "unknown command '{cmd}', try --help"
             ))),
@@ -40,10 +47,10 @@ impl Command {
 
     pub fn help() -> &'static str {
         concat!(
-            "seriallcd — Serial-to-LCD daemon\n",
+            "seriallcd - Serial-to-LCD daemon\n",
             "\n",
             "USAGE:\n",
-            "  seriallcd run [--device <path>] [--baud <number>] [--cols <number>] [--rows <number>]\n",
+            "  seriallcd run [--device <path>] [--baud <number>] [--cols <number>] [--rows <number>] [--payload-file <path>]\n",
             "  seriallcd --help\n",
             "  seriallcd --version\n",
             "\n",
@@ -52,6 +59,7 @@ impl Command {
             "  --baud <number>   Baud rate (default: 115200)\n",
             "  --cols <number>   LCD columns (default: 20)\n",
             "  --rows <number>   LCD rows (default: 4)\n",
+            "  --payload-file <path>  Load a local JSON payload and render it once (testing helper)\n",
             "  -h, --help        Show this help\n",
             "  -V, --version     Show version\n",
         )
@@ -91,6 +99,9 @@ fn parse_run_options(iter: &mut std::slice::Iter<String>) -> Result<RunOptions> 
                         .map_err(|_| Error::InvalidArgs("rows must be a positive integer".to_string()))?,
                 );
             }
+            "--payload-file" => {
+                opts.payload_file = Some(take_value(flag, iter)?);
+            }
             other => {
                 return Err(Error::InvalidArgs(format!(
                     "unknown flag '{other}', try --help"
@@ -122,7 +133,6 @@ mod tests {
     #[test]
     fn parse_run_with_overrides() {
         let args = vec![
-            "run".into(),
             "--device".into(),
             "/dev/ttyUSB0".into(),
             "--baud".into(),
@@ -131,12 +141,34 @@ mod tests {
             "16".into(),
             "--rows".into(),
             "2".into(),
+            "--payload-file".into(),
+            "/tmp/payload.json".into(),
         ];
         let expected = RunOptions {
             device: Some("/dev/ttyUSB0".into()),
             baud: Some(9600),
             cols: Some(16),
             rows: Some(2),
+            payload_file: Some("/tmp/payload.json".into()),
+        };
+        let cmd = Command::parse(&args).unwrap();
+        assert_eq!(cmd, Command::Run(expected));
+    }
+
+    #[test]
+    fn parse_run_allows_implicit_subcommand() {
+        let args = vec![
+            "--device".into(),
+            "/dev/ttyS1".into(),
+            "--payload-file".into(),
+            "/tmp/payload.json".into(),
+        ];
+        let expected = RunOptions {
+            device: Some("/dev/ttyS1".into()),
+            baud: None,
+            cols: None,
+            rows: None,
+            payload_file: Some("/tmp/payload.json".into()),
         };
         let cmd = Command::parse(&args).unwrap();
         assert_eq!(cmd, Command::Run(expected));

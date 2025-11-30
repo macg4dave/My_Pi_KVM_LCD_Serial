@@ -8,14 +8,14 @@ Transport
 
 Frame structure (suggested keys)
 - Required: `line1`, `line2` (strings; may be empty).
-- Optional fast-changing fields: `bar` (0–100) or `bar_value` (+ optional `bar_max`, default 100), `bar_label`, `scroll_speed_ms`, `blink` (bool), `backlight` (only send when false to turn off), `priority` (0–9), `ttl_ms`, `page_timeout_ms`, `icons` ([0..7]).
+- Optional fast-changing fields: `bar` (0–100) or `bar_value` (+ optional `bar_max`, default 100), `bar_label`, `scroll_speed_ms`, `blink` (bool), `backlight` (only send when false to turn off), `ttl_ms`, `page_timeout_ms`.
 - Optional infrequent fields: `hostname`, `ip`, labels. Send once, cache thereafter.
 - Optional checksum: `checksum` (hex). If present and invalid, daemon drops the frame.
 
 Behavior rules
 - Auto-scroll: any line longer than display width scrolls at default speed; `scroll_speed_ms` overrides.
 - Bar rendering: use `bar` percent if provided; otherwise compute percent from `bar_value` / `bar_max` (clamped to 100).
-- Alerts: `blink=true` + `priority`/`ttl_ms` keep alert visible; lower-priority frames are skipped during active alert TTL.
+- Alerts: `blink=true` + `ttl_ms` can keep alert visible temporarily.
 - Paging: daemon can cache multiple frames/pages; it auto-advances on `page_timeout_ms` (payload or config default) and can be advanced via a push-button.
 - Heartbeat: send periodic frames or heartbeat flag to indicate liveness; daemon shows an icon if no frames arrive within a grace period.
 
@@ -29,7 +29,7 @@ Example frames
 {"line1":"Up 12:34  CPU 42%","line2":"","bar":42}
 
 2) Alert with TTL:
-{"line1":"ALERT: Temp","line2":"85C","blink":true,"priority":9,"ttl_ms":5000}
+{"line1":"ALERT: Temp","line2":"85C","blink":true,"ttl_ms":5000}
 
 3) Long text auto-scroll with custom speed:
 {"line1":"This message will scroll automatically across the display because it is long","line2":"","scroll_speed_ms":200}

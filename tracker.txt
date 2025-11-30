@@ -1,11 +1,11 @@
-# SerialLCD Task Tracker (priority → ease)
+# SerialLCD Task Tracker
 
 Legend: P1 = highest impact, P2 = important, P3 = nice-to-have. Effort: S/M/L. Status left blank.
 
 P1 (blockers / core)
 - [ ] (S) Lock input format (newline JSON vs key=value), define required/optional fields, max frame size, optional version tag, newline terminator.
 - [ ] (M) Implement parser with validation (drop oversize frames, bad checksum if provided, unknown version); emit error state on parse failure.
-- [ ] (S) Rate-limit + de-dup render loop (target ~500ms cadence, min 200ms to avoid flicker); TTL + priority handling for alerts.
+- [ ] (S) Rate-limit + de-dup render loop (target ~500ms cadence, min 200ms to avoid flicker); TTL handling for alerts.
 - [ ] (M) Render pipeline: atomic update of line1/line2/backlight; support blink on alert; auto-scroll long text by default with default speed, allow `scroll_speed_ms` override; truncate only when scrolling disabled.
 - [ ] (M) Bar graph helper (`render_bar(percent, width)`), support `bar_value` + optional `bar_max` to auto-compute percent; CGRAM block preload (slots 0–5 bars, 6 heartbeat, 7 free).
 - [ ] (M) Button input hook (GPIO): debounce and map push-button to cycle through cached pages/frames; ensure alerts remain sticky unless configured otherwise.
@@ -19,7 +19,7 @@ P2 (important / quality)
 - [ ] (S) Preload common custom icons (battery/arrow/heart); document CGRAM reservations.
 - [ ] (S) Backlight policy: always-on default; blink for alert; expose payload control.
 - [ ] (M) Dashboard mode: line1 summary (uptime/CPU%), line2 bar; scrolling/banner modes for long text.
-- [ ] (M) Payload fields: `scroll`, `scroll_speed_ms`, `bar`, `bar_label`, `icons`, `ttl_ms`, `mode`, `priority`, `clear`, `test`.
+- [ ] (M) Payload fields: `scroll`, `scroll_speed_ms`, `bar`, `bar_label`, `icons`, `ttl_ms`, `mode`, `clear`, `test`.
 
 P3 (polish / extras)
 - [ ] (S) Optional checksum/hash field support in payloads.

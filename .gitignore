@@ -1,7 +1,16 @@
 target/
+dist/
+releases/
 **/*.rs.bk
 **/*.swp
 **/*.swo
 .idea/
 .vscode/
 Cargo.lock
+.DS_Store
+*.log
+*.tmp
+*.bak
+*.orig
+.cargo/
+/.dir-locals.el

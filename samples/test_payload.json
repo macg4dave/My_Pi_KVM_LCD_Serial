@@ -1,0 +1,16 @@
+{
+  "line1": "LCD TEST: Hello Pi | IP 192.168.0.99 | Uptime 12:34:56",
+  "line2": "{0x00}{0x01} CPU 42%  MEM 73%  NET 12.3Mbps {0x02}{0x03}",
+  "bar_value": 730,
+  "bar_max": 1000,
+  "bar_label": "MEM",
+  "bar_line1": false,
+  "bar_line2": true,
+  "backlight": true,
+  "blink": true,
+  "scroll_speed_ms": 180,
+  "ttl_ms": 15000,
+  "page_timeout_ms": 8000,
+  "clear": true,
+  "test": true
+}

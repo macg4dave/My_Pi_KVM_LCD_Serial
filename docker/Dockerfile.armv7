@@ -1,0 +1,52 @@
+# syntax=docker/dockerfile:1.6
+
+# Cross-build Rust binary for Raspberry Pi 2/3 (ARMv7, 32-bit).
+ARG RUST_VERSION=1
+FROM --platform=$BUILDPLATFORM rust:${RUST_VERSION}-bookworm AS builder
+
+ARG TARGET=armv7-unknown-linux-gnueabihf
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN dpkg --add-architecture armhf \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        gcc-arm-linux-gnueabihf \
+        libc6-dev-armhf-cross \
+        libudev-dev:armhf \
+        pkg-config \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN rustup target add ${TARGET}
+
+ENV CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc
+ENV CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc
+ENV CXX_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-g++
+ENV PKG_CONFIG_ALLOW_CROSS=1
+ENV PKG_CONFIG_PATH_armv7_unknown_linux_gnueabihf=/usr/lib/arm-linux-gnueabihf/pkgconfig
+ENV RUSTFLAGS="-C target-cpu=cortex-a7 -C target-feature=+neon,+vfpv3"
+
+WORKDIR /app
+COPY . .
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo build --release --target=${TARGET}
+
+FROM --platform=linux/arm/v7 debian:bookworm-slim AS runtime
+ARG TARGET=armv7-unknown-linux-gnueabihf
+
+RUN dpkg --add-architecture armhf \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libgcc-s1:armhf \
+        libstdc++6:armhf \
+        libudev1:armhf \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/target/${TARGET}/release/seriallcd /usr/local/bin/seriallcd
+
+USER 1000:1000
+ENTRYPOINT ["/usr/local/bin/seriallcd"]
+CMD ["--run"]

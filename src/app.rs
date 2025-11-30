@@ -1,15 +1,15 @@
 use crate::{
     cli::RunOptions,
     config::{Config, DEFAULT_BAUD, DEFAULT_COLS, DEFAULT_DEVICE, DEFAULT_ROWS},
-    lcd::Lcd,
+    lcd::{Lcd, BAR_EMPTY, BAR_FULL},
     payload::Defaults as PayloadDefaults,
     payload::RenderFrame,
     serial::SerialPort,
     Error, Result,
 };
-use std::io::BufRead;
-use std::time::{Duration, Instant};
+use std::{fs, time::{Duration, Instant}};
 
+const SCROLL_GAP: &str = "    |    ";
 /// Config for the daemon.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppConfig {
@@ -20,6 +20,7 @@ pub struct AppConfig {
     pub scroll_speed_ms: u64,
     pub page_timeout_ms: u64,
     pub button_gpio_pin: Option<u8>,
+    pub payload_file: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -32,6 +33,7 @@ impl Default for AppConfig {
             scroll_speed_ms: crate::payload::DEFAULT_SCROLL_MS,
             page_timeout_ms: crate::payload::DEFAULT_PAGE_TIMEOUT_MS,
             button_gpio_pin: None,
+            payload_file: None,
         }
     }
 }
@@ -53,10 +55,21 @@ impl App {
 
     /// Entry point for the daemon. Wire up serial + LCD here.
     pub fn run(&self) -> Result<()> {
-        let mut port = SerialPort::connect(&self.config.device, self.config.baud)?;
-        let mut lcd = Lcd::new(self.config.cols, self.config.rows);
-
+        let mut lcd = Lcd::new(self.config.cols, self.config.rows)?;
         lcd.render_boot_message()?;
+
+        if let Some(path) = &self.config.payload_file {
+            let defaults = PayloadDefaults {
+                scroll_speed_ms: self.config.scroll_speed_ms,
+                page_timeout_ms: self.config.page_timeout_ms,
+            };
+            let frame = load_payload_from_file(path, defaults)?;
+            lcd.set_backlight(frame.backlight_on)?;
+            lcd.set_blink(frame.blink)?;
+            return render_frame(&mut lcd, &frame);
+        }
+
+        let mut port = SerialPort::connect(&self.config.device, self.config.baud)?;
         port.send_line("INIT")?;
 
         let mut state = crate::state::RenderState::new(Some(PayloadDefaults {
@@ -71,6 +84,9 @@ impl App {
         let mut next_scroll = Instant::now();
         let mut scroll_offsets = (0usize, 0usize);
         let mut button = Button::new(self.config.button_gpio_pin).ok();
+        let mut backlight_state = true;
+        let blink_interval = Duration::from_millis(500);
+        let mut next_blink = Instant::now();
 
         loop {
             let now = Instant::now();
@@ -82,6 +98,7 @@ impl App {
                         scroll_offsets = (0, 0);
                         next_scroll =
                             now + Duration::from_millis(self.config.scroll_speed_ms);
+                        lcd.clear()?;
                         if let Some(frame) = current_frame.as_ref() {
                             next_page = now + Duration::from_millis(frame.page_timeout_ms);
                             render_if_allowed(
@@ -103,10 +120,15 @@ impl App {
                 if !line.is_empty() {
                     match state.ingest(line) {
                         Ok(Some(frame)) => {
-                            current_frame = Some(frame);
+                            current_frame = Some(frame.clone());
                             scroll_offsets = (0, 0);
                             next_scroll =
                                 now + Duration::from_millis(self.config.scroll_speed_ms);
+                            lcd.clear()?;
+                            backlight_state = frame.backlight_on;
+                            lcd.set_backlight(backlight_state)?;
+                            lcd.set_blink(frame.blink)?;
+                            next_blink = now + blink_interval;
                             if let Some(frame) = current_frame.as_ref() {
                                 next_page =
                                     now + Duration::from_millis(frame.page_timeout_ms);
@@ -125,13 +147,18 @@ impl App {
                 }
             }
 
-            if state.len() > 1 && now >= next_page {
-                if let Some(frame) = state.next_page() {
-                    current_frame = Some(frame);
-                    scroll_offsets = (0, 0);
-                    if let Some(frame) = current_frame.as_ref() {
-                        next_page = now + Duration::from_millis(frame.page_timeout_ms);
-                        render_if_allowed(
+                if state.len() > 1 && now >= next_page {
+                    if let Some(frame) = state.next_page() {
+                        current_frame = Some(frame);
+                        scroll_offsets = (0, 0);
+                        if let Some(frame) = current_frame.as_ref() {
+                            next_page = now + Duration::from_millis(frame.page_timeout_ms);
+                            lcd.clear()?;
+                            backlight_state = frame.backlight_on;
+                            lcd.set_backlight(backlight_state)?;
+                            lcd.set_blink(frame.blink)?;
+                            next_blink = now + blink_interval;
+                            render_if_allowed(
                             &mut lcd,
                             frame,
                             &mut last_render,
@@ -143,8 +170,13 @@ impl App {
             }
 
             if let Some(frame) = current_frame.as_ref() {
-                let needs_scroll = line_needs_scroll(&frame.line1, lcd.cols() as usize)
-                    || line_needs_scroll(&frame.line2, lcd.cols() as usize);
+                let width = lcd.cols() as usize;
+                let needs_scroll = match frame.bar_row {
+                    Some(0) => line_needs_scroll(&frame.line2, width),
+                    Some(1) => line_needs_scroll(&frame.line1, width),
+                    _ => line_needs_scroll(&frame.line1, width)
+                        || line_needs_scroll(&frame.line2, width),
+                };
                 if needs_scroll && now >= next_scroll {
                     scroll_offsets = (
                         advance_offset(&frame.line1, lcd.cols() as usize, scroll_offsets.0),
@@ -159,6 +191,17 @@ impl App {
                         min_render_interval,
                         scroll_offsets,
                     )?;
+                }
+
+                if frame.blink {
+                    if now >= next_blink {
+                        backlight_state = !backlight_state;
+                        lcd.set_backlight(backlight_state)?;
+                        next_blink = now + blink_interval;
+                    }
+                } else if backlight_state != frame.backlight_on {
+                    backlight_state = frame.backlight_on;
+                    lcd.set_backlight(backlight_state)?;
                 }
             }
         }
@@ -177,6 +220,7 @@ impl AppConfig {
             scroll_speed_ms: config.scroll_speed_ms,
             page_timeout_ms: config.page_timeout_ms,
             button_gpio_pin: config.button_gpio_pin,
+            payload_file: opts.payload_file,
         }
     }
 }
@@ -185,11 +229,21 @@ fn render_frame(lcd: &mut Lcd, frame: &RenderFrame) -> Result<()> {
     render_frame_with_scroll(lcd, frame, (0, 0))
 }
 
+fn load_payload_from_file(path: &str, defaults: PayloadDefaults) -> Result<RenderFrame> {
+    let raw = fs::read_to_string(path)?;
+    RenderFrame::from_payload_json_with_defaults(&raw, defaults)
+}
+
 fn render_bar(percent: u8, width: usize) -> String {
-    let filled = (percent as usize * width) / 100;
+    if width == 0 {
+        return String::new();
+    }
+
+    let interior = width;
+    let filled = (percent as usize * interior) / 100;
     let mut s = String::with_capacity(width);
-    for i in 0..width {
-        s.push(if i < filled { '#' } else { ' ' });
+    for i in 0..interior {
+        s.push(if i < filled { BAR_FULL } else { BAR_EMPTY });
     }
     s
 }
@@ -214,20 +268,36 @@ fn render_frame_with_scroll(
     frame: &RenderFrame,
     offsets: (usize, usize),
 ) -> Result<()> {
+    lcd.set_blink(frame.blink)?;
+
     if frame.clear {
-        lcd.render_boot_message()?;
+        lcd.clear()?;
     }
 
     let width = lcd.cols() as usize;
-    let line1 = view_with_scroll(&frame.line1, width, offsets.0);
-    let line2 = if let Some(percent) = frame.bar_percent {
-        render_bar(percent, width)
+    let bar_row = frame.bar_row;
+    let line1 = if bar_row == Some(0) && frame.bar_percent.is_some() {
+        render_bar(frame.bar_percent.unwrap(), width)
+    } else {
+        view_with_scroll(&frame.line1, width, offsets.0)
+    };
+    let line2 = if bar_row == Some(1) && frame.bar_percent.is_some() {
+        render_bar(frame.bar_percent.unwrap(), width)
     } else {
         view_with_scroll(&frame.line2, width, offsets.1)
     };
 
-    lcd.write_line(0, &line1)?;
-    lcd.write_line(1, &line2)?;
+    if line1.trim().is_empty() && bar_row != Some(0) {
+        lcd.write_line(0, "")?;
+    } else {
+        lcd.write_line(0, &line1)?;
+    }
+
+    if line2.trim().is_empty() && bar_row != Some(1) {
+        lcd.write_line(1, "")?;
+    } else {
+        lcd.write_line(1, &line2)?;
+    }
     Ok(())
 }
 
@@ -240,7 +310,8 @@ fn advance_offset(text: &str, width: usize, current: usize) -> usize {
     if len <= width {
         return 0;
     }
-    let cycle = len + 1; // include a space gap
+    let gap_len = SCROLL_GAP.chars().count();
+    let cycle = (2 * len) + gap_len; // text + gap + text
     (current + 1) % cycle
 }
 
@@ -249,12 +320,16 @@ fn view_with_scroll(text: &str, width: usize, offset: usize) -> String {
     if chars.len() <= width {
         return text.to_string();
     }
-    let gap = vec![' '];
+    let gap: Vec<char> = SCROLL_GAP.chars().collect();
     let mut cycle: Vec<char> = chars.clone();
     cycle.extend_from_slice(&gap);
     cycle.extend_from_slice(&chars);
 
-    let start = offset.min(cycle.len().saturating_sub(1));
+    let start = if cycle.is_empty() {
+        0
+    } else {
+        offset % cycle.len()
+    };
     cycle
         .iter()
         .cycle()
@@ -319,14 +394,29 @@ impl Button {
 mod tests {
     use super::*;
     use crate::config::Config;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn set_temp_home() -> std::path::PathBuf {
+        let mut dir = std::env::temp_dir();
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos();
+        dir.push(format!("seriallcd_app_test_home_{stamp}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("HOME", &dir);
+        dir
+    }
 
     #[test]
     fn config_from_options() {
+        let home = set_temp_home();
         let opts = RunOptions {
             device: Some("/dev/ttyUSB1".into()),
             baud: Some(57_600),
             cols: Some(16),
             rows: Some(2),
+            payload_file: None,
         };
         let cfg = AppConfig::from_sources(Config::default(), opts.clone());
         assert_eq!(cfg.device, "/dev/ttyUSB1");
@@ -336,10 +426,12 @@ mod tests {
 
         let app = App::from_options(opts).unwrap();
         assert_eq!(app.config.device, "/dev/ttyUSB1");
+        let _ = std::fs::remove_dir_all(home);
     }
 
     #[test]
     fn config_prefers_file_values_when_cli_missing() {
+        let home = set_temp_home();
         let cfg_file = Config {
             device: "/dev/ttyS0".into(),
             baud: 9_600,
@@ -355,5 +447,30 @@ mod tests {
         assert_eq!(merged.baud, cfg_file.baud);
         assert_eq!(merged.cols, cfg_file.cols);
         assert_eq!(merged.rows, cfg_file.rows);
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn view_with_scroll_wraps_through_gap() {
+        let text = "HELLOWORLD";
+        let width = 4;
+        let len = text.chars().count();
+
+        let start = view_with_scroll(text, width, 0);
+        let before_gap = view_with_scroll(text, width, len - 1);
+        let after_gap =
+            view_with_scroll(text, width, len + SCROLL_GAP.chars().count() + len);
+
+        assert_ne!(before_gap, start, "should advance before wrap");
+        assert_eq!(after_gap, start, "should wrap around after gap");
+    }
+
+    #[test]
+    fn view_with_scroll_shows_gap_marker() {
+        let text = "HELLOWORLD";
+        let width = 5;
+        let offset = text.chars().count() + SCROLL_GAP.chars().position(|c| c == '|').unwrap_or(0);
+        let view = view_with_scroll(text, width, offset);
+        assert!(view.contains('|'), "gap marker '|' should appear during scroll");
     }
 }

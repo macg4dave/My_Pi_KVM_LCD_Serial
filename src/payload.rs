@@ -18,24 +18,22 @@ pub struct Payload {
     pub line2: String,
 
     #[serde(default)]
-    pub bar: Option<u8>,
-    #[serde(default)]
     pub bar_value: Option<u32>,
     #[serde(default)]
     pub bar_max: Option<u32>,
     #[serde(default)]
     pub bar_label: Option<String>,
+    #[serde(default)]
+    pub bar_line1: Option<bool>,
+    #[serde(default)]
+    pub bar_line2: Option<bool>,
 
     #[serde(default)]
     pub backlight: Option<bool>, // only sent when false to turn off
     #[serde(default)]
     pub blink: Option<bool>,
     #[serde(default)]
-    pub icons: Option<Vec<u8>>,
-    #[serde(default)]
     pub scroll_speed_ms: Option<u64>,
-    #[serde(default)]
-    pub priority: Option<u8>,
     #[serde(default)]
     pub ttl_ms: Option<u64>,
     #[serde(default)]
@@ -56,9 +54,8 @@ pub struct RenderFrame {
     pub blink: bool,
     pub bar_percent: Option<u8>,
     pub bar_label: Option<String>,
-    pub icons: Vec<u8>,
+    pub bar_row: Option<u8>, // 0 = top, 1 = bottom
     pub scroll_speed_ms: u64,
-    pub priority: u8,
     pub ttl_ms: Option<u64>,
     pub page_timeout_ms: u64,
     pub clear: bool,
@@ -109,9 +106,19 @@ impl RenderFrame {
         let page_timeout_ms = payload
             .page_timeout_ms
             .unwrap_or(defaults.page_timeout_ms);
-        let priority = payload.priority.unwrap_or(0);
 
         let bar_percent = compute_bar_percent(&payload);
+        let bar_row = if bar_percent.is_some() {
+            if payload.bar_line1.unwrap_or(false) {
+                Some(0)
+            } else if payload.bar_line2.unwrap_or(true) {
+                Some(1)
+            } else {
+                Some(1)
+            }
+        } else {
+            None
+        };
 
         RenderFrame {
             line1: payload.line1,
@@ -120,9 +127,8 @@ impl RenderFrame {
             blink,
             bar_percent,
             bar_label: payload.bar_label,
-            icons: payload.icons.unwrap_or_default(),
+            bar_row,
             scroll_speed_ms,
-            priority,
             ttl_ms: payload.ttl_ms,
             page_timeout_ms,
             clear: payload.clear.unwrap_or(false),
@@ -132,10 +138,6 @@ impl RenderFrame {
 }
 
 fn compute_bar_percent(payload: &Payload) -> Option<u8> {
-    if let Some(p) = payload.bar {
-        return Some(p.min(100));
-    }
-
     if let Some(value) = payload.bar_value {
         let max = payload.bar_max.unwrap_or(100).max(1);
         let percent = ((value as f64 / max as f64) * 100.0).round() as i32;
@@ -173,15 +175,14 @@ mod tests {
         let payload = Payload {
             line1: "Hi".into(),
             line2: "There".into(),
-            bar: None,
             bar_value: None,
             bar_max: None,
             bar_label: None,
+            bar_line1: None,
+            bar_line2: None,
             backlight: None,
             blink: None,
-            icons: None,
             scroll_speed_ms: None,
-            priority: None,
             ttl_ms: None,
             page_timeout_ms: None,
             clear: None,

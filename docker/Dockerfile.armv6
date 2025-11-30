@@ -1,27 +1,35 @@
 # syntax=docker/dockerfile:1.6
 
-# Cross-build Rust binary for Raspberry Pi 1 (BCM2835, ARMv6, 32-bit).
+# Cross-build Rust binary for Raspberry Pi 1 (BCM2835, ARMv6, 32-bit) using a
+# musl cross toolchain that targets Armv6 hard-float. This avoids the Debian
+# armhf baseline (ARMv7) that was producing Illegal instruction on real Pi 1/Zero.
 ARG RUST_VERSION=1
 FROM --platform=$BUILDPLATFORM rust:${RUST_VERSION}-bookworm AS builder
 
-ARG TARGET=arm-unknown-linux-gnueabihf
+ARG TARGET=arm-unknown-linux-musleabihf
+ARG MUSL_CROSS=armv6-linux-musleabihf-cross
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN dpkg --add-architecture armhf \
-    && apt-get update \
+RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        gcc-arm-linux-gnueabihf \
-        libc6-dev-armhf-cross \
-        pkg-config \
         ca-certificates \
+        curl \
+        pkg-config \
     && rm -rf /var/lib/apt/lists/*
+
+# Grab an Armv6 hard-float musl toolchain (prebuilt) and expose it on PATH.
+RUN curl -L "https://musl.cc/${MUSL_CROSS}.tgz" \
+    | tar -xz -C /opt \
+    && ln -s /opt/${MUSL_CROSS} /opt/armv6-musl
 
 RUN rustup target add ${TARGET}
 
-ENV CARGO_TARGET_ARM_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc
-ENV CC_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc
-ENV CXX_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-g++
+ENV PATH="/opt/armv6-musl/bin:${PATH}"
+ENV CARGO_TARGET_ARM_UNKNOWN_LINUX_MUSLEABIHF_LINKER=armv6-linux-musleabihf-gcc
+ENV CC_arm_unknown_linux_musleabihf=armv6-linux-musleabihf-gcc
+ENV CXX_arm_unknown_linux_musleabihf=armv6-linux-musleabihf-g++
 ENV PKG_CONFIG_ALLOW_CROSS=1
+ENV PKG_CONFIG_PATH_arm_unknown_linux_musleabihf=/opt/armv6-musl/armv6-linux-musleabihf/lib/pkgconfig
 ENV RUSTFLAGS="-C target-cpu=arm1176jzf-s -C target-feature=+vfp2"
 
 WORKDIR /app
@@ -30,22 +38,13 @@ COPY . .
 # Cache cargo downloads and build artifacts to speed up rebuilds.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/app/target \
     cargo build --release --target=${TARGET}
 
-# Runtime image: tiny Debian arm/v6 with the compiled binary.
-FROM --platform=linux/arm/v6 debian:bookworm-slim AS runtime
-ARG TARGET=arm-unknown-linux-gnueabihf
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        libgcc-s1:armhf \
-        libstdc++6:armhf \
-        ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# Runtime image: the binary is fully static (musl), so use scratch.
+FROM --platform=linux/arm/v6 scratch AS runtime
+ARG TARGET=arm-unknown-linux-musleabihf
 
 COPY --from=builder /app/target/${TARGET}/release/seriallcd /usr/local/bin/seriallcd
 
-USER 1000:1000
 ENTRYPOINT ["/usr/local/bin/seriallcd"]
 CMD ["--run"]

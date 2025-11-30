@@ -43,6 +43,11 @@ impl Default for Config {
 impl Config {
     pub fn load_or_default() -> Result<Self> {
         let path = config_path()?;
+        if !path.exists() {
+            let cfg = Self::default();
+            cfg.save_to_path(&path)?;
+            return Ok(cfg);
+        }
         Self::load_from_path(&path)
     }
 
@@ -168,6 +173,14 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    fn temp_home(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        std::env::temp_dir().join(format!("seriallcd_home_{name}_{stamp}"))
+    }
+
     fn temp_path(name: &str) -> PathBuf {
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -235,5 +248,22 @@ mod tests {
         if let Some(parent) = path.parent() {
             let _ = fs::remove_dir(parent);
         }
+    }
+
+    #[test]
+    fn load_or_default_creates_file_with_defaults() {
+        let home = temp_home("create");
+        std::env::set_var("HOME", &home);
+        let cfg_path = home.join(".serial_lcd").join("config.toml");
+
+        let cfg = Config::load_or_default().unwrap();
+        assert_eq!(cfg, Config::default());
+        assert!(cfg_path.exists(), "expected config file to be created");
+
+        let contents = fs::read_to_string(&cfg_path).unwrap();
+        assert!(contents.contains("device ="));
+        assert!(contents.contains("baud ="));
+
+        let _ = fs::remove_dir_all(home);
     }
 }

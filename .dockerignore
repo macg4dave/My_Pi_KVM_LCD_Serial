@@ -1,0 +1,17 @@
+target/
+releases/
+dist/
+.git/
+.gitignore
+Dockerfile
+docker-compose.yml
+docker-compose.yaml
+*.swp
+*.swo
+*.rs.bk
+.idea/
+.vscode/
+*.log
+*.tmp
+*.bak
+*.orig

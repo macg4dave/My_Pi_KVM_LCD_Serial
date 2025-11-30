@@ -13,14 +13,14 @@ Input protocol (from sibling)
 - Transport: UART (/dev/ttyAMA0 by default), 115200 8N1.
 - Message framing: newline-delimited UTF-8 text.
 - Payload options:
-  - JSON: e.g., {"line1":"...", "line2":"...", "icons":[0,1]}
+  - JSON: e.g., {"line1":"...", "line2":"..."}
   - key=value lists: e.g., line1=Hello;line2=World;backlight=1
 - TODO: finalize one format (prefer newline JSON for extensibility) and reject malformed frames with error logging.
 - TODO: define maximum line length and truncate safely (16 or 20 columns).
 - TODO: define custom icon indices 0-7 to map to CGRAM slots preloaded at startup.
-- Metrics payloads (from sibling): uptime, free RAM, CPU %, disk %, temperature. Include normalized percentages to drive bar graphs/icons.
+- Metrics payloads (from sibling): uptime, free RAM, CPU %, disk %, temperature. Include normalized percentages to drive bar graphs.
 - Simple payload schema ideas (pick a small subset to support):
-  - Fields: `line1`, `line2` (plain text), `backlight` (optional; only send when false to turn off), `blink` (0/1 for backlight blink on error), `scroll_speed_ms` (optional; default from config), `bar` (percent, defaults to 0–100) or `bar_value` + optional `bar_max` (default 100), `icons` ([0..7]) for custom chars to embed via `{0xNN}`.
+  - Fields: `line1`, `line2` (plain text), `backlight` (optional; only send when false to turn off), `blink` (0/1 for backlight blink on error), `scroll_speed_ms` (optional; default from config), `bar` (percent, defaults to 0–100) or `bar_value` + optional `bar_max` (default 100).
   - Commands: `clear=1`, `test=1` (writes “TEST”), `heartbeat=1` (optional ping to keep display alive), `priority` (0–9) to avoid lower-priority updates overwriting active alerts.
   - Alerts: `alert=1` sets backlight blink and prefixes “ALERT:” on line 1; `alert_msg` overrides line 2.
   - Duration: `ttl_ms` to keep a message on screen before it expires (else stickiness until next frame).
@@ -43,10 +43,8 @@ Serial handling
 
 LCD handling
 - Use `lcd_driver::Hd44780` over PCF8574 (with optional autodetect).
-- TODO: preload custom icons (battery, heart, arrows, etc.) at startup using `load_custom_bitmaps`.
-- TODO: support `{0xNN}` placeholders via `putstr_extended` for icons embedded in text.
 - TODO: expose a lightweight API to set two lines and backlight state atomically to reduce flicker.
-- TODO: bar graphs: precompute 0–5 block chars (0%, 20%, 40%, 60%, 80%, 100%) and a helper `render_bar(percent, width)` to render usage bars (CPU/memory/disk).
+- TODO: bar graphs: precompute 0-5 block chars (0%, 20%, 40%, 60%, 80%, 100%) and a helper `render_bar(percent, width)` to render usage bars (CPU/memory/disk).
 - TODO: status dashboard layout: line 1 = text summary (e.g., "Up 12:34  CPU 23%"), line 2 = bar graph for key metric.
 - CGRAM reservation: document slots 0–5 for bar blocks, 6 for heartbeat, 7 free for sibling payloads; enforce no overwrite unless explicitly allowed.
   - Auto-scroll behavior: default marquee for any line longer than width; allow per-frame `scroll_speed_ms` to override default speed.
@@ -60,14 +58,14 @@ Config
 - Hot reload/overrides: optionally watch config file or accept `config` commands in payload to update scroll speed/backlight policy; log applied changes.
 
 Daemon loop
-- TODO: main loop: read frame -> parse -> map to `line1`, `line2`, backlight/icon hints -> render.
+- TODO: main loop: read frame -> parse -> map to `line1`, `line2`, backlight hints -> render.
 - TODO: rate-limit redraws to avoid flicker (e.g., debounce duplicate frames).
 - TODO: handle backlight toggle without disturbing data lines (driver already supports this).
 - TODO: optional heartbeat: periodically write a small indicator (custom char) to show liveness.
 - Update policy:
   - Rate-limit screen updates (target ~500 ms cadence for fast-moving metrics like CPU; cap minimum to avoid flicker, e.g., 200 ms).
   - De-dup identical payloads to avoid redundant writes.
-  - TTL + priority: drop low-priority frames while an alert with TTL is active.
+  - TTL: expire frames after their TTL if provided.
   - Default page timeout: if streaming frames include multiple pages, auto-advance after a default timeout (e.g., 3–5 seconds); allow override via config/payload (`page_timeout_ms`).
 
 Testing/Validation
@@ -77,9 +75,12 @@ Testing/Validation
 - Testing hooks: support `test=1` payload to render a known pattern; add sample frames for alerts, bars, scrolling, and checksum/invalid cases.
 
 API surface for sibling program
-- Agreed contract: newline-delimited frames; define required keys (`line1`, `line2`) and optional keys (`backlight`, `icons`, `clear`).
+- Agreed contract: newline-delimited frames; define required keys (`line1`, `line2`) and optional keys (`backlight`, `clear`).
 - TODO: versioning: include a `v` field or prefix to allow future changes (e.g., `v=1;line1=...`).
 - Error/diagnostics display: reserve an error state (`ERR PARSE`) and set backlight blink on parse/validation failures; heartbeat icon shows if daemon is alive even when no frames arrive.
+
+Low priority / parking lot
+- Custom icons and `{0xNN}` placeholders; define CGRAM slots and preloaded bitmaps once core features are stable.
 
 Operational concerns
 - Logs to stderr or `/run/serial_lcd_cache/seriallcd.log` (RAM disk only).
@@ -88,6 +89,5 @@ Operational concerns
 
 Open questions (fill before implementing)
 - Exact message format choice (JSON vs key=value).
-- Icon set and CGRAM mapping.
 - Refresh cadence and duplicate-frame suppression policy.
 - Backlight policy (always on vs controlled by payload).

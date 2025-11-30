@@ -95,6 +95,13 @@ No persistent state must ever be created.
 * Formatting/lints: `rustfmt`; `clippy` must be clean or documented if skipped.
 * Safety: avoid `unsafe`; avoid `unwrap()` outside tests/examples unless justified.
 * Performance/reliability: target <5 MB RSS; avoid busy loops; handle serial/LCD errors with retries and backoff; never crash the daemon loop.
+Write clean, idiomatic Rust.
+All changes must pass `cargo test` on both x86_64 and ARMv6
+all clippy warnings must be resolved
+all public functions/types must have Rustdoc comments.
+all cli flags and config options must be documented in README.md.
+all cli flags must have tests covering their behavior.
+never always deadcode ignore or allow attributes without explicit approval.
 
 ## Task request template (use for every ask)
 Task:
