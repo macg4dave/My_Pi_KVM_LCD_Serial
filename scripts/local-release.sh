@@ -37,36 +37,8 @@ ALL_TARGETS=0
 UPLOAD_ASSETS=()
 ALL_TARGETS_DEFAULT=("" "arm-unknown-linux-musleabihf" "armv7-unknown-linux-gnueabihf" "aarch64-unknown-linux-gnu")
 
-derive_arch_label() {
-    local triple="${1:-}"
-    case "${triple}" in
-        arm-unknown-linux-musleabihf) echo "armv6"; return ;;
-        armv7-unknown-linux-gnueabihf) echo "armv7"; return ;;
-        aarch64-unknown-linux-gnu) echo "arm64"; return ;;
-    esac
-    if [[ -n "${triple}" ]]; then
-        case "${triple}" in
-            *armv6*) echo "armv6" ;;
-            *armv7*) echo "armv7" ;;
-            *aarch64*|*arm64*) echo "arm64" ;;
-            *x86_64*|*amd64*) echo "x86_64" ;;
-            *i686*|*i386*) echo "x86" ;;
-            *) echo "${triple}" ;;
-        esac
-        return
-    fi
-
-    local uname_arch
-    uname_arch="$(uname -m)"
-    case "${uname_arch}" in
-        armv6*) echo "armv6" ;;
-        armv7*) echo "armv7" ;;
-        aarch64|arm64) echo "arm64" ;;
-        x86_64|amd64) echo "x86_64" ;;
-        i686|i386) echo "x86" ;;
-        *) echo "${uname_arch}" ;;
-    esac
-}
+# Load reusable build helpers (derive_arch_label, is_inside_container, has_rust_target_installed)
+source "${ROOT}/scripts/build_helpers.sh"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -252,6 +224,10 @@ build_with_cargo() {
     fi
 
     echo "Building lifelinetty ${CRATE_VERSION} (${arch_label})..."
+    if [[ "${SKIP_BUILD_ACTIONS:-0}" == "1" ]]; then
+        echo "SKIP_BUILD_ACTIONS=1; skipping cargo build (test mode)"
+        return 0
+    fi
     cargo build "${build_args[@]}"
     package_artifacts "${triple}" "${arch_label}" "${target_dir}" "${deb_args[*]}" "${rpm_args[*]}"
 }
@@ -265,6 +241,10 @@ build_with_docker() {
     local target_dir="target/${triple}"
     local release_dir="${ROOT}/${target_dir}/release"
 
+    if [[ "${SKIP_BUILD_ACTIONS:-0}" == "1" ]]; then
+        echo "SKIP_BUILD_ACTIONS=1; skipping docker build (test mode)"
+        return 0
+    fi
     require_cmd docker
     mkdir -p "${release_dir}"
 
@@ -296,7 +276,26 @@ for TARGET_TRIPLE in "${TARGETS[@]}"; do
             build_with_docker "${TARGET_TRIPLE}" "${arch_label}" "linux/arm/v7" "docker/Dockerfile.armv7" "lifelinetty:armv7"
             ;;
         aarch64-unknown-linux-gnu)
-            build_with_docker "${TARGET_TRIPLE}" "${arch_label}" "linux/arm64/v8" "docker/Dockerfile.arm64" "lifelinetty:arm64"
+            # Prefer a native host build when we're on an aarch64 host and rustup target exists
+            # - FORCE_DOCKER=1 will force Docker build
+            # - USE_HOST_BUILD=1 (default behavior) will attempt host build first
+            if [[ "${FORCE_DOCKER:-0}" == "1" ]]; then
+                echo "FORCE_DOCKER=1 set; using Docker for aarch64"
+                build_with_docker "${TARGET_TRIPLE}" "${arch_label}" "linux/arm64/v8" "docker/Dockerfile.arm64" "lifelinetty:arm64"
+            else
+                if is_inside_container; then
+                    echo "Container environment detected; using Docker for aarch64"
+                    build_with_docker "${TARGET_TRIPLE}" "${arch_label}" "linux/arm64/v8" "docker/Dockerfile.arm64" "lifelinetty:arm64"
+                else
+                    if [[ "${USE_HOST_BUILD:-1}" == "1" ]] && has_rust_target_installed "${TARGET_TRIPLE}" && (uname -m | grep -Eq 'aarch64|arm64'); then
+                        echo "Detected aarch64 host and rustup target installed — building natively with cargo"
+                        build_with_cargo "${TARGET_TRIPLE}" "${arch_label}"
+                    else
+                        echo "Falling back to Docker cross-build for aarch64"
+                        build_with_docker "${TARGET_TRIPLE}" "${arch_label}" "linux/arm64/v8" "docker/Dockerfile.arm64" "lifelinetty:arm64"
+                    fi
+                fi
+            fi
             ;;
         *)
             build_with_cargo "${TARGET_TRIPLE}" "${arch_label}"

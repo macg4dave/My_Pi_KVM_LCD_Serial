@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "LifelineTTY: serial terminal lifeline daemon and client."
-repository = ""
+repository = "https://github.com/macg4dave/LifelineTTY"
 
 [features]
 default = []

@@ -113,6 +113,8 @@ If you see animations, your wiring is perfect.
 
 `--demo` is your best friend.
 
+Note for builders: the included `Makefile` and `scripts/local-release.sh` will prefer native host builds when your machine matches the requested target (for example, building arm64 on an aarch64 host). Set `FORCE_DOCKER=1` to force the Docker cross-build path if needed.
+
 ---
 
 ## Sending JSON (This is the real magic)
