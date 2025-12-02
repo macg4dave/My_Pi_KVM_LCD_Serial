@@ -1,273 +1,97 @@
-Alright, let’s nail this one properly.
+# Milestone G — CLI Integration Mode (`--serialsh`)
 
-Here’s **Milestone G — serialsh mode** reworked as a clean, crate-driven, 100% Rust design **without code**, but concrete enough to implement straight away.
+> **Roadmap alignment**: Milestone G in [docs/roadmap.md](./roadmap.md) (depends on P7, P8, P16 and the completion of Milestones A & B). This document replaces the AI draft with a scoped plan that matches the current repository layout and charter.
 
----
+## 🎯 Goal
 
-## 📌 Milestone G — CLI Integration Mode (`--serialsh`)
+Provide an opt-in CLI front-end that lets an operator run individual commands through the Milestone A command tunnel, see stdout/stderr as text, and exit with the same status code the remote side returned. The feature must *not* change the default `lifelinetty --run` LCD daemon path and must honor all existing storage, serial, and memory limits.
 
-### High-level Goal
+## 🚦 Prerequisites & Gating
 
-When invoked with a special flag, the program behaves like a **remote pseudo-shell**:
+* Milestone A (bi-directional command tunnel) exposes a stable request/response API with stdout/stderr chunking in `src/app/connection.rs`.
+* Milestone B (negotiation) guarantees that a CLI peer can learn whether the remote endpoint supports the tunnel; `serialsh` must bail out cleanly if the capability bit is missing.
+* Priority items P7 (CLI groundwork), P8 (command tunnel schema), and P16 (CLI UX polish hooks) must be merged before this milestone is scheduled.
+* No additional crates beyond the charter are required; history/editing must use `std::io` or reuse the existing optional `ctrlc` crate.
 
-* Reads commands from the user line-by-line.
-* Sends them over the **Milestone A command tunnel**.
-* Streams stdout/stderr back in near real-time.
-* Exits with the same exit code as the last remote command (or a clear, documented policy).
+## 📦 Deliverables
 
-This is **pure text, non-PTY**, no TTY/termcap magic, and fully optional.
+1. `--serialsh` flag parsing in `src/cli.rs`, mutually exclusive with `--run`, `--test-lcd`, and `--test-serial`.
+2. A CLI execution path in `src/app/mod.rs` (or a focused helper module) that:
+   * Builds the serial connection using the same config/CLI overrides as the daemon.
+   * Initializes the command tunnel client from Milestone A.
+   * Drives an interactive loop on stdin/stdout without touching the LCD driver.
+3. Signal handling that routes Ctrl+C through the tunnel (cancel current command) and exits the process if pressed again while idle. The existing `ctrlc` dependency must be reused; no new runtime.
+4. Deterministic exit code policy documented in `README.md` + roadmap:
+   * 0 when the session runs at least one command and the last command exits 0.
+   * Last remote exit code when available.
+   * 255 for transport/negotiation failures.
+5. CLI smoke/integration tests (using `tests/bin_smoke.rs` + `tests/fake_serial_loop.rs`) that cover happy-path execution, non-zero exits, disconnects, and Ctrl+C behavior.
+6. Documentation updates (`README.md`, `docs/roadmap.md`, `docs/milestone_g.md`, and `samples/` payloads if needed) describing usage, caveats, and storage impacts. History/temporary artifacts must live under `/run/serial_lcd_cache`.
 
----
+## 🛠️ Implementation Plan
 
-## 🎯 Behaviour & UX
+### 1. Parser & mode selection
 
-### Invocation
+* Extend the existing custom parser in `src/cli.rs` to accept `--serialsh` and optional overrides already supported elsewhere (`--device`, `--baud`, `--cols`, `--rows`).
+* Reject invalid flag mixes up front (e.g., `--serialsh --run`).
+* Expose a `CliMode::SerialShell` enum branch so downstream modules can branch without string parsing.
 
-* Default behaviour (`--run` or no flags): existing LCD / service mode, unchanged.
-* New mode: `--serialsh` (plus optional flags: device, baud, maybe timeout).
+### 2. Serial connection + negotiation bootstrap
 
-Process stays in the **foreground**, like a shell or `ssh` session.
+* Reuse `src/app/connection.rs::SerialConnectionBuilder` (introduced for Milestone A) so serialsh shares retry/backoff policies.
+* After open, run the Milestone B capability exchange; abort with a friendly message if the command tunnel bit is absent or times out. Ensure logs go to stderr and `/run/serial_lcd_cache/serialsh.log` if logging to file is required.
 
-### User Experience
+### 3. Command loop façade
 
-* Prompt text is simple (`> ` or similar), configurable later.
-* User types a line → it’s sent as a single Milestone A command request over the tunnel.
-* Output appears as soon as chunks arrive:
+* Create a lightweight loop (synchronous for now) that blocks on `stdin().read_line`. Async runtimes are unnecessary because serial IO is already offloaded.
+* Each submitted line is wrapped in the Milestone A command request struct and sent through the tunnel client handle. Responses surface as an iterator/stream of `CommandChunk::Stdout`/`::Stderr` plus a final status frame.
+* Print stdout chunks to `stdout` verbatim; stderr chunks go to `stderr`. No ANSI or PTY negotiation. Buffering must be line-oriented to avoid growing RSS.
+* Track the most recent exit code; if no commands run, default to 0.
 
-  * stdout chunks rendered as-is
-  * stderr chunks optionally prefixed or distinguished (configurable later, but plain text by default)
-* When the remote process exits:
+### 4. History & prompt (optional, RAM-only)
 
-  * The prompt returns for the next command.
-  * The effective exit code is tracked for tests and script integration.
+* Minimal viable product: constant prompt `serialsh>` written to stderr so stdout remains reserved for remote data.
+* If history is enabled later, cache it in `/run/serial_lcd_cache/serialsh_history`. Provide a `--no-history` knob but keep it off by default until UX polish work (P16) lands.
 
-### Compatibility Constraints
+### 5. Ctrl+C and cancellation
 
-* `--serialsh` **must not** become the default mode.
-* Systemd or boot service units continue to use the existing mode by default.
-* `--serialsh` is **opt-in** and must not be enabled silently by configs.
+* Register a handler via the existing `ctrlc` crate that notifies the command loop (e.g., an `AtomicBool` or channel).
+* When a command is in-flight, send a tunnel “cancel” frame defined by Milestone A and wait for confirmation before re-displaying the prompt.
+* When idle, the first Ctrl+C simply exits with the last recorded status; document this behavior in the README and tests.
 
----
+### 6. Error handling + exit semantics
 
-## 🧱 Architectural Integration
-
-### Components Involved
-
-* `src/cli.rs`
-
-  * Extends argument parsing to understand `--serialsh`.
-  * Handles CLI-only settings (history toggle, device, baud, timeouts).
-
-* `src/app/mod.rs`
-
-  * Adds a **“CLI front-end”** mode that:
-
-    * Initializes serial connection.
-    * Runs the Milestone A tunnel + heartbeat logic.
-    * Wraps an interactive loop around the command tunnel.
-
-* `src/app/connection.rs` / `render_loop.rs`
-
-  * Expose a “command tunnel client API” that:
-
-    * Sends a single command request.
-    * Returns a stream of stdout/stderr chunks + final exit status.
-  * In serialsh mode, LCD stuff can be either disabled or minimally engaged; priority is command tunnel.
-
-* `docs/README.md`
-
-  * New section describing serialsh usage, caveats, and examples.
-
----
-
-## 🧩 CLI Parsing & Options
-
-### Parser Behaviour (in `src/cli.rs`)
-
-Extend existing argument parsing (currently `clap`-style custom):
-
-* Recognise `--serialsh` as a **mode** flag.
-* Additional flags for this mode, for example:
-
-  * `--device` or `--port` (path to serial device, optional if default exists).
-  * `--baud` (fallback to sane default).
-  * `--history` toggle (on/off).
-  * `--timeout` for per-command or idle timeout, if desired.
-
-The parser must clearly differentiate between:
-
-* “Run as service / LCD daemon”
-* “Run as serialsh interactive CLI”
-
-No overlapping or ambiguous flags.
-
----
-
-## 🔄 Command Loop Model
-
-### Core Flow
-
-1. Initialize:
-
-   * Open serial port using your standard serial backend.
-   * Run handshakes / negotiation (Milestone B) to ensure we’re in the **command client** role.
-   * Initialize the command tunnel interfaces from Milestone A (send command, receive streams).
-
-2. Enter interactive loop:
-
-   * Read a single line of input from stdin.
-   * If EOF (Ctrl+D) or “exit”/empty line logic: break loop and terminate properly.
-   * Send the line as a tunneled command request.
-   * While waiting for response:
-
-     * Stream stdout/stderr back as soon as chunks arrive.
-     * Watch for remote exit message and final status.
-   * Return to input prompt.
-
-3. Exit:
-
-   * Close serial gracefully.
-   * Exit process with appropriate exit code (policy defined below).
-
-### Line Input / History
-
-* Primary option: **simple line-based input** using standard input/output.
-* Optional enhancement: if allowed, integrate `rustyline` or similar:
-
-  * Command history.
-  * Basic line-editing (arrow keys, etc.).
-  * History file location:
-
-    * Under RAM disk (`/run/serial_lcd_cache/serialsh_history`) to avoid writing outside configured constraints, or configurable.
-* History must be **optional** and disabled in constrained environments.
-
----
-
-## 🧨 Signals & Ctrl+C Handling
-
-### Using the `ctrlc` crate
-
-* global handler that:
-
-  * In `serialsh` mode: does **not** immediately terminate the whole program.
-  * Instead:
-
-    * Sends a **“terminate current command”** message through the command tunnel (e.g. a control packet defined in Milestone A/B world).
-    * Marks the current command as “interrupted” locally.
-  * If repeated or if there is no active command:
-
-    * On second Ctrl+C, exits the CLI process (documented behaviour).
-
-### Requirements
-
-* Signal handler must be cheap (no heavy work in the handler).
-* Proper coordination with the async runtime / event loop:
-
-  * Typically by notifying a dedicated task via an atomic flag or channel.
-
----
-
-## 🧾 Output Formatting Rules
-
-* **Plain text only by default.**
-
-  * No hard dependency on ANSI/colour escapes.
-  * Just pass through remote stdout/stderr chunks verbatim.
-* Basic separation logic:
-
-  * Optionally prefix stderr lines with a token (e.g. “stderr: ”) for debugging, behind a flag.
-  * By default, simply merge into the same output stream, like a normal terminal.
-* Prompt rules:
-
-  * Simple, consistent prompt string.
-  * No fancy dynamic path detection or $PS1-style environment.
-  * Keep it robust under incomplete or garbled outputs.
-
----
-
-## 📑 Exit Code Semantics
-
-Decide and document a clear policy for process exit:
-
-* If no commands were successfully run:
-
-  * Exit code `0` (successful session) **or** a distinct “no command” code (but keep it simple initially).
-* If one or more commands were run:
-
-  * The **exit code of the last command** becomes the process exit status.
-* If the remote side crashes, disconnects, or times out:
-
-  * Non-zero exit code (a fixed value, e.g. 255).
-  * Document that as “connection/transport failure” code.
-
-This matters for scripts that wrap `serialsh`.
-
----
+* Lost serial link, negotiation timeout, or malformed tunnel responses must result in a user-facing error plus exit code 255. Cache any debug artifacts under `/run/serial_lcd_cache/serialsh_*`.
+* Non-zero remote exits propagate directly so scripts can check `$?`.
+* Ensure `Drop` implementations flush/close the serial port cleanly to avoid leaving the daemon endpoint in an inconsistent state.
 
 ## 🧪 Testing Strategy
 
-Integration tests (no actual code, just behaviour design):
+* **Unit tests**: add focused tests around new CLI parsing branches and tunnel-client helpers.
+* **Integration tests**:
+  * Extend `tests/bin_smoke.rs` with a serialsh invocation that uses the fake serial backend to execute `echo hi` and verify the captured output + exit code.
+  * Add scenarios to `tests/fake_serial_loop.rs` (or a new helper) to simulate non-zero exits, disconnects, and cancel frames.
+  * Include a regression ensuring `--serialsh` refuses to run when negotiation reports “LCD-only”.
+* **Manual smoke**: run `cargo run -- --serialsh --device /dev/ttyUSB0 --baud 9600` against a dev board once Milestone A is wired up, documenting the steps in `docs/releasing.md`.
 
-* **Happy path**:
+## 📝 Documentation & Ops
 
-  * Fake serial backend returns simple command output (`echo hi` → “hi”).
-  * Test that:
+* Update `README.md` CLI table and usage examples.
+* Mention serialsh mode in `docs/roadmap.md` progress notes plus `docs/architecture.md` (interaction diagram showing CLI vs daemon path).
+* Provide a short “Try it” snippet referencing the fake serial server in `samples/` once available.
+* Ensure systemd units stay untouched—`serialsh` is an interactive user command, not a service.
 
-    * Input line triggers one remote request.
-    * Output is printed in correct order.
-    * The final exit code matches remote.
+## 🚫 Out of Scope
 
-* **Error path**:
+* No PTY emulation, SSH-like multiplexing, or network sockets.
+* No new config files or persistent state outside `~/.serial_lcd/config.toml`.
+* No LCD rendering when `--serialsh` is selected—the daemon path remains the only component driving the panel.
+* No speculative protocol changes; all framing/negotiation updates must land in Milestones A/B before this milestone is scheduled.
 
-  * Remote returns non-zero exit.
-  * CLI must propagate that exit status.
+## Allowed crates & dependencies
 
-* **Transport failure**:
-
-  * Fake backend simulates disconnection mid-command.
-  * CLI:
-
-    * Prints an error message.
-    * Exits with “connection failure” code.
-
-* **Ctrl+C handling**:
-
-  * Simulate an interrupt during a long-running command.
-  * Ensure a “terminate command” control flow is triggered, and CLI returns to prompt.
-  * Repeat to ensure second interrupt cleanly exits process.
-
-* **Legacy / Fallback**:
-
-  * If the remote side does not support the command tunnel (Milestone A not available):
-
-    * `serialsh` should fail early with a clear, user-facing error (e.g. “remote does not support command tunnel”), not fall back silently to random LCD-only behaviour.
-
-All of this is testable using:
-
-* A fake serial endpoint.
-* Event simulation for stdin, signals, and remote frames.
+Serial shell mode keeps the dependency set unchanged: `std`, `serde`, `serde_json`, `crc32fast`, `hd44780-driver`, `serialport`, optional `tokio`/`tokio-serial` via the existing feature flag, `rppal`, `linux-embedded-hal`, and `ctrlc`. Interactive behavior relies on `std::io` plus the already-whitelisted `ctrlc` crate—no line-editing or PTY crates are added.
 
 ---
 
-## 🔐 Safety & Constraints
-
-* No PTYs, no TTY manipulations: avoids a whole class of complexity.
-* No configuration or hidden behaviour that flips into serialsh automatically.
-* No writes outside:
-
-  * `/run/serial_lcd_cache` (for temporary files/history) and
-  * explicit user paths/config paths you already defined (if at all).
-* serialsh uses **only** the command tunnel and control-plane we’ve already specified in earlier milestones.
-
----
-
-## ✅ What This Milestone Delivers
-
-When this is done, you get:
-
-* A **usable, scriptable CLI** that turns LifelineTTY into a pseudo-remote shell over UART.
-* Clean interaction with the command tunnel (Milestone A), negotiation (Milestone B), and file transfer / future features.
-* Well-structured, crate-backed design with signal handling and tests.
-* No regression to existing modes or systemd units.
-
-If you want, next step we can design the **exact command tunnel “API surface”** that serialsh will rely on (conceptually: “send command, subscribe to output, await exit”) so you have a clear internal boundary between CLI and core tunnel logic.
+Keeping Milestone G focused on the CLI façade ensures we can deliver value immediately after the tunnel and negotiation work ship, without bloating the binary or violating the RAM-disk/storage contract.

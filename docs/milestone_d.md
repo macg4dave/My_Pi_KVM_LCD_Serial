@@ -1,299 +1,103 @@
+# 📌 Milestone D — Live Hardware Polling & Heartbeat
 
-Draft specification for the Milestone B of the LifelineTTY project.
-NOTE: This is not code to be executed, but rather documentation describing design ideas and architecture of the feature my be implemented
----
+> Roadmap alignment: **Milestone D** corresponds to **P11 (Live hardware polling agent)**, **P15 (Heartbeat + watchdog)**, and **P18 (Config-driven polling profiles)** in [docs/roadmap.md](./roadmap.md). Work here assumes Milestones A–C delivered tunnel framing, negotiation, and file-transfer plumbing.
 
-# 📌 Milestone D — Live Hardware Polling (Rust-Native, Async/Nonblocking, Framed)
+## Current repo snapshot (Dec 2025)
 
-**Goal**
-Continuously gather **CPU, memory, temperature, disk, and (optional) network metrics** on the host platform and feed them into the tunnel & LCD rendering pipeline. Includes heartbeat generation & offline detection.
+- `src/app/render_loop.rs` owns the only long-running loop. It handles LCD updates, reconnect banners, and a local blink-based heartbeat when frames stop, but it has no concept of remote heartbeats or metrics events.
+- `state::RenderState` and `payload::parser` only understand LCD frames (`Payload`/`RenderFrame`). There is no tunneled schema yet; Milestone A will add it, and Milestone D will extend it with metrics + heartbeat variants.
+- `Cargo.toml` lists the currently approved crates (`serialport`, `hd44780-driver`, `serde`, `crc32fast`, `ctrlc`, `rppal`, `linux-embedded-hal`). There is **no** `systemstat`, so polling must parse `/proc` + `/sys` directly or leverage `rppal` for Pi sensors.
+- `CACHE_DIR` lives in `src/lib.rs` and is already enforced by `app::Logger` and `serial::telemetry`. Any new logs or caches must live in `/run/serial_lcd_cache`.
 
-**Critical Rule**
-This **must not** block the serial loop, file-transfer loop, or command-tunnel loop. Polling must always be asynchronous, throttled, and isolated.
+## Target outcome
 
----
+1. Raspberry Pi 1 nodes stream CPU, memory, load, disk, temperature, and optional network counters without exceeding the 5 MB RSS ceiling or starving LCD updates.
+2. A background polling worker emits structured metrics frames and dedicated heartbeat packets into the same tunnel router as LCD payloads so command/file-transfer traffic stays coordinated.
+3. Heartbeat timeouts drive the LCD offline overlay (`display::overlays::render_offline_message`) and pause tunnel/file-transfer actions until the remote endpoint recovers.
+4. Polling cadence, heartbeat intervals, and per-metric enable flags are configured via `~/.serial_lcd/config.toml`, validated in `config::loader`, and surfaced through `AppConfig`.
+5. Temporary artifacts (logs, cached samples) stay under `/run/serial_lcd_cache/metrics/` and are automatically rotated when the daemon restarts.
 
-# 🎯 Architectural Principles
+## Implementation plan
 
-Taken from ser2net in *concept*, not in implementation:
+### 1. Config + feature gates
 
-* **One core I/O reactor owns the serial link** (as in Milestone A).
-* **Everything else communicates via message queues**.
-* **Never block the main loop**.
-* **Treat metrics as a structured protocol, not raw text**.
-* **Use timers + state machines**, not sleep loops.
+- Extend `src/config/mod.rs` and `config/loader.rs` with an optional `[polling]` table:
 
-Where ser2net used event loops (gensio), we use **Tokio timers + channels**.
+  ```toml
+  [polling]
+  interval_ms = 5000          # clamp to 1000..60000
+  heartbeat_interval_ms = 500 # clamp to 200..5000
+  heartbeat_timeout_ms = 2000 # must be > heartbeat_interval_ms
+  enable_cpu = true
+  enable_memory = true
+  enable_disk = true
+  enable_temp = true
+  enable_network = false
+  ```
 
----
+- Merge these values into `AppConfig` (similar to cols/rows/backoff) so `render_loop` can spawn or skip the worker without CLI changes (charter forbids new flags unless explicitly approved).
+- Validation errors reuse `Error::InvalidArgs` and are covered by new tests in `config::loader`.
 
-# 📂 Scope + File Layout
+### 2. Polling worker module (`src/app/polling.rs`)
 
-```
-src/
- ├ app/
- │   ├ polling.rs           # NEW: async metrics poller + heartbeat generator
- │   ├ render_loop.rs       # consumes metrics frames
- │   ├ lifecycle.rs         # heartbeat liveness checks
- │   └ connection.rs
- ├ payload/
- │   ├ schema.rs            # add MetricsMsg + HeartbeatMsg
- │   └ parser.rs
- ├ config/
- │   └ config.toml          # add polling interval knobs
-tests/
- └ polling_defaults.rs
-```
+- Create a lightweight thread via `std::thread::spawn` that receives a cloned `Logger` and a bounded `std::sync::mpsc::Sender<PollingEvent>`.
+- Gather metrics using standard library IO:
+  - `/proc/stat` for CPU totals (store the previous sample to compute deltas).
+  - `/proc/meminfo` for memory totals/free/available.
+  - `/proc/loadavg` for 1/5/15-minute load averages.
+  - `libc::statvfs` for root filesystem capacity/free bytes.
+  - `/sys/class/thermal/thermal_zone*/temp` through buffered reads (optional when `enable_temp`).
+  - `/sys/class/net/<iface>/statistics/{rx,tx}_bytes` when `enable_network` is true; interfaces are sanitized to alphanumeric names.
+- Reuse string buffers across iterations to keep allocations low; convert samples into a `MetricsSample` struct that only stores primitive numbers.
+- Emit `PollingEvent::Metrics(MetricsSample)` and `PollingEvent::Heartbeat(HeartbeatSample)` each tick. Errors log via `logger.warn(...)` but do not kill the thread.
 
----
+### 3. Tunnel schema + payload parsing
 
-# 🧩 1. Polling Backend (`src/app/polling.rs`)
+- When Milestone A adds the `TunnelMsg` serde envelope, extend it with:
 
-Two implementation strategies:
+  ```rust
+  pub enum TunnelMsg {
+      // existing variants…
+      Metrics(MetricsMsg),
+      Heartbeat(HeartbeatMsg),
+  }
+  ```
 
-### ✔ Option A: `systemstat` crate
+- `MetricsMsg` mirrors `MetricsSample` but caps optional arrays/strings to satisfy future P13 strict-mode requirements. `HeartbeatMsg` contains `{ "timestamp_ms": u64, "seq": u64 }`.
+- Update `src/payload/parser.rs` tests to cover JSON round-trips, field bounds, and malicious inputs (e.g., giant strings, negative numbers).
 
-Clean, safe, async-friendly (just wrap system calls in tasks).
+### 4. Render loop + lifecycle integration
 
-### ✔ Option B: Manual `/proc` + `/sys` readers
+- Add a `std::sync::mpsc::Receiver<PollingEvent>` to `run_render_loop`. Poll it once per iteration with `try_recv()` so serial reads remain priority.
+- Introduce `MetricsState` (likely `src/state.rs`) that caches the latest metrics and exposes formatted LCD lines (e.g., `CPU 42%  Temp 55C`). When configured, enqueue a metrics frame into `RenderState` so it rotates with other payloads.
+- Extend `lifecycle.rs` with `HeartbeatState { last_seq, last_seen }`. When heartbeats stop for `heartbeat_timeout_ms`, toggle the offline overlay and pause file-transfer/command operations until the next heartbeat.
+- When we are the negotiated “server,” emit outbound heartbeats by passing `TunnelMsg::Heartbeat` through the existing serial writer; when we are the “client,” ingest remote heartbeats and feed them into `HeartbeatState`.
 
-Use `tokio::fs` + buffered readers. Good for custom parsing and minimal deps.
+### 5. Storage, logging, and observability
 
-Both are 100% Rust, safe, and configurable.
+- Add `/run/serial_lcd_cache/metrics/metrics.log` using the existing cache-aware logger helper. Include `polling_tick`, `heartbeat_seq`, and any sensor errors.
+- Reuse `tracing` spans (already enabled elsewhere) to annotate polling and heartbeat activity so operators can correlate with `/run/serial_lcd_cache/serial_backoff.log`.
+- Provide a `lifelinetty_metrics.json` snapshot (optional) under the same directory for manual inspection; rotate it on each successful poll.
 
----
+### 6. Testing
 
-# 🧱 Type Definitions (Serde)
+- `config::loader` unit tests covering `[polling]` defaults, overrides, and validation failures (bounds + timeout ordering).
+- `app::polling` unit tests that feed synthetic `/proc` data via temporary files and assert parsed totals/deltas.
+- `tests/integration_mock.rs` scenario where metrics + heartbeat events arrive while LCD frames continue, proving the render loop stays responsive and offline overlay triggers when heartbeats stop.
+- `tests/bin_smoke.rs` ensures `lifelinetty --help` references the new config table and that the daemon runs when `[polling]` is omitted.
+- Future `tests/fake_serial_loop.rs` (once LCD stubs are enabled per P4) to verify interleaving of metrics, command tunnel, and file-transfer traffic.
 
-Add these to `payload/schema.rs`:
+### 7. Out of scope for Milestone D
 
-```rust
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MetricsMsg {
-    pub cpu_usage: f32,
-    pub load_avg: (f32, f32, f32),
-    pub mem_total: u64,
-    pub mem_free: u64,
-    pub mem_avail: u64,
-    pub disk_total: u64,
-    pub disk_free: u64,
-    pub temp_celsius: Option<f32>,
-    pub net_rx: Option<u64>,
-    pub net_tx: Option<u64>,
-}
+- Adding new dependencies like `systemstat` or async runtimes beyond the optional `tokio-serial` feature.
+- Additional CLI subcommands/flags; all control remains in `config.toml`.
+- Persisting metrics outside `/run/serial_lcd_cache` or emitting them over non-UART transports.
+- Per-metric interval profiles (those belong to P18 once the base polling agent ships).
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct HeartbeatMsg {
-    pub timestamp_ms: u64,
-    pub seq: u64,
-}
-```
+## Allowed crates & dependencies
 
-These will be wrapped inside `TunnelMsg::Metrics(MetricsMsg)` and `TunnelMsg::Heartbeat(HeartbeatMsg)` with the same outer framing used everywhere else (Milestone A).
+Polling and heartbeat work stay within the approved crate list: `std`, `serde`, `serde_json`, `crc32fast`, `hd44780-driver`, `serialport`, optional `tokio`/`tokio-serial` (only through the existing feature flag), `rppal`, `linux-embedded-hal`, and `ctrlc`. Metrics readers parse `/proc` + `/sys` manually so no new crates such as `systemstat` are introduced.
 
----
+## Result
 
-# 🧠 2. Async Polling Task (Tokio)
-
-In `polling.rs`:
-
-```rust
-pub async fn start_polling(
-    tx: mpsc::Sender<TunnelMsg>,
-    interval: Duration,
-) {
-    let mut ticker = tokio::time::interval(interval);
-    let mut seq = 0;
-
-    loop {
-        ticker.tick().await;
-
-        if let Ok(metrics) = gather_metrics().await {
-            let _ = tx.send(TunnelMsg::Metrics(metrics)).await;
-        }
-
-        let hb = HeartbeatMsg {
-            timestamp_ms: now_ms(),
-            seq,
-        };
-        seq += 1;
-
-        let _ = tx.send(TunnelMsg::Heartbeat(hb)).await;
-    }
-}
-```
-
-**Key rule:**
-The poller **never touches the serial port directly**. It only sends structured frames through the internal queue.
-
-This ensures serial traffic is never blocked, even if `/proc` has a stall or a temperature sensor is missing.
-
----
-
-# 🖥️ 3. Metric Collection Logic (Nonblocking)
-
-Example using `systemstat`:
-
-```rust
-pub async fn gather_metrics() -> anyhow::Result<MetricsMsg> {
-    use systemstat::{Platform, System};
-
-    let sys = System::new();
-    let cpu = sys.cpu_load_aggregate()?.done()?;
-    let mem = sys.memory()?;
-    let load = sys.load_average()?;
-    let disk = sys.mount_at("/")?;
-
-    let temp = sys.cpu_temp().ok();   // Optional: not all boards expose this
-
-    Ok(MetricsMsg {
-        cpu_usage: 1.0 - cpu.idle,
-        load_avg: (load.one, load.five, load.fifteen),
-        mem_total: mem.total.as_u64(),
-        mem_free: mem.free.as_u64(),
-        mem_avail: mem.avail.map(|v| v.as_u64()).unwrap_or(0),
-        disk_total: disk.total.as_u64(),
-        disk_free: disk.free.as_u64(),
-        temp_celsius: temp.map(|t| t as f32),
-        net_rx: None,  // optional network reading in future
-        net_tx: None,
-    })
-}
-```
-
-No blocking. Pure Rust. Always returns quickly.
-
-For missing sensors, return `None`, not an error.
-
----
-
-# 📡 4. Render Loop Integration
-
-In `render_loop.rs`:
-
-* Add another branch in the serial multiplexer:
-
-```rust
-tokio::select! {
-    Some(msg) = metrics_rx.recv() => {
-        match msg {
-            TunnelMsg::Metrics(m) => update_lcd_metrics(m),
-            TunnelMsg::Heartbeat(h) => update_heartbeat_state(h),
-            _ => {}
-        }
-    }
-    // … existing serial/LCD/command/file-transfer branches …
-}
-```
-
-* **LCD view should reflect metrics only if in the correct role** (e.g., server or client depending on design).
-* **Heartbeat misses** should trigger fallback screens (“remote offline”).
-
----
-
-# ❤️ 5. Heartbeat System (Critical)
-
-Heartbeat is part of Milestone D because:
-
-* file-transfer (C)
-* command tunnel (A)
-* negotiation (B)
-* metrics (D)
-
-all need a *liveness guarantee*.
-
-### Heartbeat Rules
-
-* Every `interval` subset (e.g. metrics every 5s, heartbeat every 500ms).
-* Heartbeat messages include a monotonic sequence number.
-* On receive side, if N heartbeats are missed:
-
-  * mark remote as “offline”
-  * flip LCD into offline/fallback mode
-  * block file transfers + commands
-
-### Detection Logic:
-
-In `lifecycle.rs`:
-
-```rust
-struct HeartbeatState {
-    last_seq: u64,
-    last_seen: Instant,
-}
-
-impl HeartbeatState {
-    fn seen(&mut self, seq: u64) {
-        self.last_seq = seq;
-        self.last_seen = Instant::now();
-    }
-
-    fn is_alive(&self, timeout: Duration) -> bool {
-        self.last_seen.elapsed() < timeout
-    }
-}
-```
-
-Render loop checks this periodically.
-
----
-
-# ⚙️ 6. Configuration: `config.toml`
-
-Add keys:
-
-```toml
-[polling]
-interval_ms = 5000
-heartbeat_interval_ms = 500
-heartbeat_timeout_ms = 2000
-```
-
-Test coverage:
-
-* defaults load correctly
-* overrides apply correctly
-* invalid values fail gracefully
-
----
-
-# 🧪 7. Tests
-
-### ✔ `tests/polling_defaults.rs`
-
-* Ensure default polling period is correct
-* Ensure heartbeat is emitted regularly
-* Mock a stalled poll (inject artificial failure) and ensure the system recovers
-* Ensure one serial failure doesn’t block metrics queue
-
-### ✔ Integration Test w/ Fake Serial
-
-Using `tokio::io::duplex`:
-
-* Metrics transmitted as framed messages
-* Heartbeats interleaved with file-transfer and command-tunnel traffic
-* Heartbeat timeout → system switches to offline-mode
-
----
-
-# 🔒 8. Safety & Constraints
-
-* **No blocking I/O anywhere in polling** — use `tokio::fs`, `tokio::task`, `systemstat`, or pure async `/proc` parsing.
-* **Never read sensors more frequently than configured interval** — prevent load spikes.
-* **No direct hardware writes** unless you later add sensors via embedded-hal.
-* **Heartbeat is fully typed, CRC’d, and framed** — consistent with Milestones A/B/C.
-
----
-
-# 🏁 Summary: What Milestone D Delivers
-
-You now have:
-
-* A full async hardware-polling module
-* Metrics surfaced cleanly into the LCD renderer & serial tunnel
-* Heartbeat-based liveness detection for remote endpoints
-* Configurable intervals and safe defaults
-* Nonblocking, deterministic behaviour
-* 100% Rust, built on crates, layered, testable, robust
-
--
+Milestone D ships a RAM-disk-compliant polling subsystem that feeds structured metrics and heartbeat packets into the existing render/tunnel logic without blocking serial IO. It keeps code localized to `src/app/polling.rs`, `src/app/render_loop.rs`, `src/app/lifecycle.rs`, and the config/payload layers already in this repository, paving the way for stricter watchdog behavior in later priorities.

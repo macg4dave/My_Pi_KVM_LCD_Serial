@@ -10,6 +10,9 @@ repository = ""
 default = []
 # Enable async serial when needed; off by default for minimal footprint.
 async-serial = ["tokio-serial", "tokio"]
+# P7: CLI integration groundwork uses a gated serial shell flag so
+# experimental builds can opt in without affecting releases.
+serialsh = []
 
 [dependencies]
 hd44780-driver = "0.4"

@@ -1,295 +1,132 @@
 
-*Draft specification for Milestone e of the LifelineTTY project. This file documents design intent only—no code here is executable.*
----
+# 📌 Milestone F — JSON-Protocol Mode + Payload Compression (P13 + P14 + P10)
+
+*Draft specification for Milestone f of the LifelineTTY project. This file documents design intent only—no code here is executable.*
 
 ---
 
-## 📌 Milestone F — JSON Protocol Mode + Payload Compression
+> Scope alignment: Milestone F implements roadmap items **P13 (JSON schema validation)**, **P14 (payload compression)**, and reuses the transport scaffolding from **P10 (file push/pull)** per [docs/roadmap.md](./roadmap.md). Work must keep the daemon HD44780-only, respect `/run/serial_lcd_cache` for all temporary data, and hold decompression buffers under 1 MB.
 
-**Goal**
-Introduce a **strict, versioned JSON protocol** for all tunnel payloads, with **optional LZ4/zstd compression** for high-volume traffic (logs, file chunks, metrics bursts), while staying:
+## Goal
 
-* JSON-first (no opaque binary protocol)
-* Backwards compatible with uncompressed endpoints
-* Safe with hard memory caps and robust validation
+Ship a strict, versioned JSON protocol for every serial payload plus an optional compression envelope (LZ4 first, zstd when approved). The parser upgrades land in `src/payload/parser.rs`, leverage existing `serde` models, and remain backward compatible with current newline JSON frames. Compression is opt-in, negotiated via Milestone B handshake bits, and never compromises the <5 MB RSS guardrail on Raspberry Pi 1.
 
----
+### Success criteria
 
-## 🎯 High-Level Design
+- Frames include a `schema_version` and type discriminator; legacy payloads without the field still parse via compatibility paths.
+- The parser enforces length and enum bounds (bars, icons, file chunk sizes, metrics arrays) and returns structured `Error::Parse` variants when validation fails.
+- Optional compression envelopes (initially `codec = "lz4"`) encapsulate inner JSON payloads without exceeding a 1 MB post-decompression limit; malformed envelopes log to `/run/serial_lcd_cache/protocol_errors.log` and do not crash the daemon.
+- CLI + config switches allow operators to request compression; when remote peers lack the capability the runtime auto-falls back to plain JSON and emits a warning.
+- Unit and integration tests cover uncompressed and compressed paths using the existing fake serial loops and stub LCD backends; cargo fmt/clippy/test continue to pass on x86_64 + ARMv6.
 
-This milestone adds three key things:
+## Current architecture snapshot
 
-1. A **versioned JSON schema** with explicit validation rules.
-2. A **compression envelope** that can wrap any existing framed payload.
-3. Capability/negotiation bits (from Milestone B) so both sides agree on whether compression is allowed and which codec to use.
+- `src/payload/parser.rs` converts newline JSON into `RenderFrame` structs (LCD focus) and performs light validation (bars, icons). No schema versioning or compression support exists today.
+- `src/state.rs` deduplicates frames via CRC but assumes each frame fits inside the 512-byte raw limit (MAX_FRAME_BYTES) and is uncompressed.
+- `src/app/render_loop.rs` reads raw lines from `SerialPort::read_message_line`, feeds them to `RenderState`, and logs parse errors before showing offline overlays.
+- `src/cli.rs` exposes only the core flags (`--device`, `--baud`, etc.); there is no way to request compression from the CLI or config.
+- `tests/integration_mock.rs` and `tests/fake_serial_loop.rs` assert LCD rendering behavior using plain JSON fixtures.
 
-All of it is implemented in pure Rust, using `serde`/`serde_json` and pure-Rust compression crates.
+Milestone F keeps the current framing (newline-delimited JSON) but wraps it in a formal schema + optional envelope so downstream milestones (file transfer, tunnel, telemetry) can reuse the same parser.
 
----
+## Workstreams
 
-## 1. JSON Schema Versions & Validation (Parser Layer)
+### 1. Schema + validation upgrades (P13)
 
-Everything lives conceptually in `src/payload/parser.rs` and neighbouring schema modules.
+**Files:** `src/payload/parser.rs`, `src/payload/mod.rs`, new `src/payload/schema.rs` (if needed), `docs/architecture.md`, `docs/roadmap.md` (status annotations), `samples/*.json`.
 
-Design:
+- Define a `ProtocolFrame` enum with variants for display frames (current `RenderFrame`), file chunk manifests (P10), control messages, and the new compression envelope. Embed a `schema_version: u8` and `frame_type` string in the serialized form.
+- Teach `RenderFrame::from_payload_json_with_defaults` to detect missing `schema_version` and treat it as `0` (legacy). Version `1` enforces new rules: `line1/line2` length caps, icon counts ≤ 4, bar labels bounded to display width, etc.
+- Introduce manual bounds helpers (max string length, array len, numeric ranges). Violations map to `Error::Parse(String)` with concise wording so CLI logs remain readable.
+- Update `samples/payload_examples.json` and `docs/lcd_patterns.md` with schema-versioned fixtures to help operators craft valid frames.
+- Extend unit tests in `src/payload/parser.rs` to cover version parsing, default fallback, bounds enforcement, and checksum validation with the new canonical serialization (checksum excludes the compression envelope when present).
 
-* Introduce a `schema_version` concept:
+### 2. Compression envelope + codec plumbing (P14)
 
-  * For example: “v1 = current single-payload layout, v2 = adds compression envelope, new message families, etc.”
-  * Parser must know what version it expects to see and what it is allowed to emit.
+**Files:** `src/payload/parser.rs`, new `src/payload/compression.rs`, `src/serial/*.rs` (for buffer sizing), `docs/architecture.md`, `README.md` (protocol section).
 
-* Define a **top-level protocol object** (conceptually) with:
+- Add an optional outer envelope: `{ "type": "compressed", "schema_version": N, "codec": "lz4", "original_len": 1234, "data": "<base64>" }`.
+- Prefer a pure Rust codec such as `lz4_flex` for the initial implementation. Adding this crate (or any other codec) requires an explicit charter update before landing; until then the compression path stays behind a feature flag with stubbed hooks. Decompression must enforce:
+  - `original_len ≤ 1_048_576` bytes (hard limit).
+  - `data.len()` sanity checks to avoid allocating huge buffers for clearly invalid frames.
+- Store temporary decompression buffers inside `/run/serial_lcd_cache/payload_cache/` when they cannot fit on the stack. Clean up after each frame to honor the RAM-disk policy.
+- Provide helper APIs so callers can ask `ProtocolFrame::into_render_frame()` without re-running decompression when not needed.
+- Reject unknown codecs or mismatched `original_len` values with `Error::Parse("unsupported codec")` and log the event (see Workstream 5).
 
-  * A version field (e.g. an integer or string like `"v1"`, `"v2"`).
-  * A type-discriminant field (e.g. `"type": "file_chunk"`, `"type": "metrics"`, `"type": "display"`, `"type": "control"`, `"type": "compressed"`).
-  * A payload field whose structure depends on the type and version.
+### 3. Capability negotiation hooks (ties into Milestone B)
 
-* Validation helpers:
+**Files:** `src/app/connection.rs`, `src/app/lifecycle.rs`, `src/app/events.rs`, `docs/milestone_b.md` (if cross-referenced).
 
-  * After `serde` deserialization, run **manual bounds checks**:
+- Define compression-related capability bits (e.g., `COMPRESS_LZ4`, `COMPRESS_ZSTD`, `SCHEMA_V1`). These live alongside the handshake scaffolding landing in Milestone B; for now add stubs that default to “compression disabled” so Milestone F can be merged ahead of the full handshake.
+- When both peers advertise a common codec, set a runtime flag on `AppConfig` indicating compressed frames are allowed. Otherwise run in legacy mode and keep emitting warnings if the user forced compression via CLI/config.
+- Ensure handshake failures never block the LCD render loop: negotiation happens before the render loop starts writing frames, with timeouts falling back to uncompressed mode.
 
-    * Deny payloads with absurd sizes (e.g. file chunk bytes length > max chunk, metrics arrays too large, string fields exceeding configured limits).
-    * Reject unknown or mismatched enum values in a controlled way.
-  * On any violation:
+### 4. CLI + config controls
 
-    * Return a structured parser error.
-    * Do not crash, do not panic.
+**Files:** `src/cli.rs`, `src/config/{mod.rs,loader.rs}`, `README.md` CLI table, `tests/bin_smoke.rs`.
 
-* Backwards compatibility:
+- Add optional `--compressed` (boolean) and `--codec <lz4|zstd>` flags to `lifelinetty run`. Flags can only be parsed after existing ones; maintain compatibility with implicit `run` mode.
+- Mirror these settings in `~/.serial_lcd/config.toml` under a `[protocol]` table:
 
-  * If no `schema_version` field is present, treat it as “legacy v0” and map into the v1 model where possible.
-  * This allows older tools to still talk to a newer endpoint in a reduced capability mode.
+  ```toml
+  [protocol]
+  schema_version = 1
+  compression = { enabled = false, codec = "lz4" }
+  ```
 
----
+- Config validation ensures the codec value is recognized and refuses to save invalid options.
+- Smoke tests (`tests/bin_smoke.rs`) cover `--compressed`/`--codec` combinations, verifying that unsupported codecs trigger user-friendly errors without starting the daemon.
 
-## 2. Compression Envelope Design
+### 5. Logging, limits, and integration tests (P10 alignment)
 
-This is a **pure JSON wrapper** that sits *around* your existing payload types, not inside each specific message schema.
+**Files:** `src/app/logger.rs`, `src/serial/telemetry.rs`, `tests/{integration_mock.rs,fake_serial_loop.rs}`, `docs/releasing.md` (release checklist).
 
-Concept:
+- Create `/run/serial_lcd_cache/protocol_errors.log` (rotate ≤256 KB) for parser/compression failures. The existing `Logger` already writes inside the cache dir; extend it with a helper for protocol errors so field ops can inspect bad payloads.
+- For large payload types (file chunks from Milestone C/P10), add guards ensuring chunk metadata + compressed data stay within negotiated limits before writing to disk.
+- Integration tests feed compressed and plain fixtures through `tests/fake_serial_loop.rs` to ensure `RenderState` dedupe logic still works when the same logical payload arrives via different envelope forms.
+- Document the operational flow in `docs/releasing.md` so release builds capture the negotiated schema/compression state in their QA checklist.
 
-* The “outer frame” (which is already a single JSON object per newline from Milestone A) can either be:
+## Acceptance checklist
 
-  * A normal payload (uncompressed), or
-  * A **compression envelope** that says: *“inside here is another payload, but compressed”*.
+1. Parser accepts legacy payloads (no `schema_version`) and emits versioned frames when the field is present.
+2. Compression envelopes round-trip through the daemon when LZ4 is enabled; attempting to send compressed frames to a non-compression peer logs an error and drops the frame without crashing.
+3. Decompression buffers are capped at 1 MB and live exclusively inside `/run/serial_lcd_cache` when heap allocations are required.
+4. CLI/config toggles exist, default to uncompressed mode, and surface clear errors for unsupported codecs or schema versions.
+5. Tests and documentation cover schema versions, compression behavior, failure modes, and operator guidance; markdownlint passes across updated docs.
 
-* The compression envelope conceptually includes:
+## Sample frames
 
-  * A boolean or explicit marker indicating compression is in use.
-  * The codec name (e.g. `"lz4"`, `"zstd"`).
-  * The original schema version of the inner payload.
-  * The compressed data, encoded in a JSON-safe way (e.g. base64, or a binary-friendly representation if you later move to CBOR).
+```json
+// Legacy display payload (treated as schema_version 0)
+{"line1":"HELLO","line2":"WORLD","icons":["battery"]}
 
-* Decode order:
+// Compressed LZ4 envelope carrying a schema v1 display payload
+{
+  "type":"compressed",
+  "schema_version":1,
+  "codec":"lz4",
+  "original_len":128,
+  "data":"BASE64-LZ4-BYTES"
+}
+```
 
-  1. Parse outer JSON.
-  2. If not compressed → validate and dispatch as normal.
-  3. If compressed:
+## Test & rollout plan
 
-     * Check codec field against negotiated capabilities.
-     * Base64 decode (or similar) to get compressed bytes.
-     * Enforce the **<1 MB decompression buffer limit** before allocating.
-     * Decompress using the chosen Rust codec.
-     * Parse the inner JSON payload from the decompressed bytes.
-     * Run standard schema version checks and manual validation.
+- Unit tests: extend `src/payload/parser.rs` to cover schema versions, bounds, and compression decode errors; add codec-specific tests under a new `payload::compression` module.
+- Integration tests: enhance `tests/integration_mock.rs` and `tests/fake_serial_loop.rs` so compressed fixtures reach the LCD stub without panics; verify duplicate suppression works when the same logical payload alternates between compressed/uncompressed forms.
+- Fuzz/boundary tests: optionally leverage `proptest` (behind a dev-only feature) to stress the parser with truncated JSON, bogus base64, and oversize `original_len` claims.
+- CLI smoke: update `tests/bin_smoke.rs` to exercise `lifelinetty --run --compressed --codec lz4 --demo` and confirm help text documents the new flags.
+- Release checklist: document how to toggle compression in `README.md` and `docs/architecture.md`, and capture negotiation logs during QA runs on Raspberry Pi 1 hardware.
 
-* Encoding order is the reverse:
+## Allowed crates & dependencies
 
-  1. Serialize the inner payload to JSON text.
-  2. Optionally compress it.
-  3. Wrap it in the envelope with codec metadata.
-  4. Serialize the outer JSON as the actual frame.
+Schema enforcement and baseline functionality stay within the approved crates: `std`, `serde`, `serde_json`, `crc32fast`, `hd44780-driver`, `serialport`, optional `tokio`/`tokio-serial` via the existing feature, `rppal`, `linux-embedded-hal`, and `ctrlc`. Compression codecs such as `lz4_flex` or `zstd` are **not** currently whitelisted; introducing them requires a signed-off charter update plus dependency review before code lands.
 
-This keeps the core protocol logical and debuggable: you can always see when something is compressed and what’s inside, rather than having random opaque blobs on the wire.
+## Out of scope
 
----
+- Adding new transport protocols (still newline JSON over UART only).
+- Introducing async runtimes or network sockets for compression helpers; everything stays in the existing sync render loop.
+- Implementing non-whitelisted codecs until the charter explicitly allows them (start with LZ4; zstd arrives only after approval).
+- Persisting compressed artifacts outside `/run/serial_lcd_cache`; the only persistent file remains `~/.serial_lcd/config.toml`.
 
-## 3. Negotiation Bits for Compression (Integration with Milestone B)
-
-Milestone B introduced capabilities and handshake messages. Milestone F adds new **capability bits and negotiation logic** for compression.
-
-Concept:
-
-* Add capability flags like:
-
-  * “supports compressed envelopes”
-  * “supports LZ4”
-  * “supports zstd”
-  * (and optionally, “supports schema v2+”)
-
-* During handshake:
-
-  * Each endpoint advertises:
-
-    * Supported schema versions.
-    * Supported compression codecs.
-  * The negotiation logic:
-
-    * Chooses the **highest common schema version**.
-    * Chooses a **single codec** for compressed mode (or none if no common codec).
-  * Once negotiated:
-
-    * Both sides know whether:
-
-      * Uncompressed-only mode must be used.
-      * Optional compression can be used.
-      * Which codec to default to if compression is requested.
-
-* Protocol guarantee:
-
-  * No side is allowed to send compressed payloads unless the other side explicitly advertised and accepted that codec.
-  * If a compressed envelope appears on a peer that doesn’t support it, it is treated as a protocol violation (soft failure, logged, connection continues if possible).
-
----
-
-## 4. Buffer Limits, Safety, and Malformed Packets
-
-Critical safety constraint: **no decompression buffer may exceed 1 MB**.
-
-Design:
-
-* Before decompressing:
-
-  * Look at the compressed size and the envelope metadata.
-  * If the compressed size already suggests an unreasonably large decompressed payload (e.g. multiple MB for a simple log chunk), reject it outright.
-  * Maintain a hard upper bound (e.g. 1 MB) on the decompressed payload size:
-
-    * If decompressor indicates the output would exceed that, terminate decompression and flag an error.
-
-* Malformed packets:
-
-  * Any failure in:
-
-    * JSON parsing
-    * Envelope semantics (missing fields, unknown codec)
-    * Base64 decoding
-    * Decompression
-    * Inner JSON parsing
-    * Manual validation
-  * Must result in:
-
-    * A structured error that includes:
-
-      * Type of failure (parse, codec, bounds)
-      * Possibly a short context string (not the full payload, to avoid log spam).
-    * Logging to RAM disk (e.g. under `/run/serial_lcd_cache/protocol_errors.log` or similar).
-  * The connection stays alive unless failures are continuous and you choose to implement a maximum-error threshold.
-
-* Importantly:
-
-  * The parser must not panic on junk.
-  * It should treat untrusted input as untrusted, especially if the serial link might be exposed or bridged.
-
----
-
-## 5. CLI Mode & Configuration
-
-CLI gets a **compression-aware** mode:
-
-* New CLI flags:
-
-  * A global flag like `--compressed` to request compressed mode.
-  * An optional codec selector like `--codec lz4` or `--codec zstd`.
-* Behaviour:
-
-  * On startup, if compression is requested:
-
-    * The local endpoint sets its negotiation preferences to include the chosen codec.
-  * If the remote peer does not agree on compression:
-
-    * Local side logs that compression is disabled.
-    * Falls back to pure JSON mode.
-* Config file integration:
-
-  * `config.toml` can include:
-
-    * Default schema version (for sending).
-    * Default compression preference.
-    * Per-payload-type compression policies (e.g. compress logs and file chunks, but never compress small control messages).
-* Default behaviour:
-
-  * Compression is **off by default** unless explicitly enabled via config or CLI, to keep things predictable and simplify debugging.
-
----
-
-## 6. Test Strategy
-
-You want both **unit tests** and **integration-style tests** around the parser and compression layer.
-
-Test coverage:
-
-1. Plain JSON round-trip:
-
-   * Serialize typical payloads (metrics, file chunks, display commands).
-   * Deserialize and verify they match.
-   * Confirm they conform to size and bounds limits.
-
-2. Compressed JSON round-trip:
-
-   * Build fixtures where the inner payload is logs or file chunks.
-   * Encode using the compression envelope (for each codec).
-   * Ensure the parser:
-
-     * Recognizes compression.
-     * Decompresses.
-     * Validates inner payload correctly.
-
-3. Boundary & fuzz-like tests:
-
-   * Payloads right at size limits.
-   * Payloads that claim to be compressed but are not.
-   * Truncated base64 data.
-   * Random garbage where JSON should be.
-   * Very deeply nested JSON (if you permit it at all) → verify it is rejected if it exceeds configured structural depth.
-
-4. Negotiation behaviour:
-
-   * One side supports LZ4 only, other supports zstd only → expect no compression usage.
-   * Both support LZ4 → envelope with LZ4 is accepted.
-   * Compression requested on CLI but peer doesn’t support it → documented fallback to uncompressed mode.
-
-5. Logging:
-
-   * Verify that malformed packets:
-
-     * Do not crash parser.
-     * Are logged to RAM disk.
-     * Do not exceed log file quotas (you may choose to cap error log size or rotate).
-
----
-
-## 7. Crates & Tooling (All-Rust)
-
-* `serde` / `serde_json`
-
-  * Already in use for the core message schemas.
-
-* Candidate compression crates (pure Rust, or safe wrappers):
-
-  * `lz4_flex` (pure Rust LZ4 implementation).
-  * `zstd-safe` or similar (safe wrappers; depending on your “no native deps” stance you may or may not allow this).
-  * You can start with one codec (LZ4) to keep it simple.
-
-* `anyhow` or your existing error type stack:
-
-  * Useful for wrapping codec/framing/parsing errors with context.
-
-* Testing tools:
-
-  * Use existing Rust test framework (`#[test]`), maybe `proptest` or similar if you later want true fuzz-style coverage.
-
-Everything stays in the Rust ecosystem. No C libs, no external tools required.
-
----
-
-## 🏁 What Milestone F Actually Delivers
-
-By the end of this milestone, LifelineTTY will have:
-
-* A **versioned JSON protocol** with strict validation.
-* An **optional, negotiated compression layer** that can wrap any existing payload.
-* Hard limits on decompression buffers and clean handling of malformed/hostile input.
-* CLI and configuration knobs to control whether compression is used and which codec is preferred.
-* A test suite that proves both compressed and uncompressed paths are safe, bounded, and backward compatible.
-
-All of it is **100% Rust**, schema-driven, and matches the architecture you’ve already laid down in A–E.
+Delivering Milestone F with these constraints keeps the daemon debuggable, resource-safe, and ready for the heavier payloads planned in the file-transfer and tunnel milestones.

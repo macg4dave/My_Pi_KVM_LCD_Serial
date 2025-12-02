@@ -1,6 +1,6 @@
 # 📌 Milestone B — Auto-negotiation: server/client role resolution (Rust-native, async, framed)
 
-*Draft specification for Milestone B of the LifelineTTY project. This file documents design intent only—no code here is executable.*
+*Draft specification for Milestone B of the LifelineTTY project. This file documents design intent only—no code here is executable.* Keep this document aligned with the dependencies listed in [docs/roadmap.md](./roadmap.md) for **P9** and the Milestone A/B handshake notes.
 
 ## Outcome
 
@@ -25,20 +25,31 @@ Enable two LifelineTTY endpoints to connect with zero manual configuration, deci
 - **Lifecycle FSM (`src/app/lifecycle.rs`)** — introduces `LifecycleState::{Negotiating, Active(NegotiatedRole)}` with timeout + retry bookkeeping. Negotiation runs once at startup or after serial reconnects.
 - **Connection driver (`src/app/connection.rs`)** — owns the serial backend, emits `Hello`, listens for control frames, and invokes the FSM’s decision helpers.
 - **Render loop gating (`src/app/render_loop.rs`)** — blocks LCD updates and tunnel traffic until `Active` with either Server/Client role or fallback.
-- **Payload schema (`src/payload/schema.rs`)** — defines `ControlMsg`, `Capabilities` bitflags, `RolePreference`, and `NegotiatedRole`, all serialized via serde and validated with unit tests.
-- **Testing harness (`tests/fake_serial_loop.rs`)** — uses `tokio::io::duplex` pairs to simulate two devices, race conditions, and error cases without hardware.
+- **Payload schema (`src/payload/schema.rs`)** — defines `ControlMsg`, the `Capabilities` bitmask struct, `RolePreference`, and `NegotiatedRole`, all serialized via serde and validated with unit tests.
+- **Testing harness (`tests/fake_serial_loop.rs`)** — reuses the in-tree fake serial endpoints to emulate two devices, race conditions, and error cases without hardware (no extra async crates required).
 
 ## Control-plane protocol
 
 ```rust
-bitflags::bitflags! {
-    #[derive(Serialize, Deserialize)]
-    pub struct Capabilities: u32 {
-        const HANDSHAKE_V1  = 0b0000_0001;
-        const CMD_TUNNEL_V1 = 0b0000_0010;
-        const LCD_V2        = 0b0000_0100;
-        const HEARTBEAT_V1  = 0b0000_1000;
-        const FILE_XFER_V1  = 0b0001_0000; // reserved for Milestone C
+#[derive(Default, Serialize, Deserialize, Clone, Copy)]
+pub struct Capabilities {
+    pub bits: u32,
+}
+
+impl Capabilities {
+    pub const HANDSHAKE_V1: u32 = 0b0000_0001;
+    pub const CMD_TUNNEL_V1: u32 = 0b0000_0010;
+    pub const LCD_V2: u32 = 0b0000_0100;
+    pub const HEARTBEAT_V1: u32 = 0b0000_1000;
+    pub const FILE_XFER_V1: u32 = 0b0001_0000; // reserved for Milestone C
+
+    pub fn has(&self, mask: u32) -> bool {
+        (self.bits & mask) != 0
+    }
+
+    pub fn with(mut self, mask: u32) -> Self {
+        self.bits |= mask;
+        self
     }
 }
 
@@ -101,5 +112,9 @@ All tests live in `tests/fake_serial_loop.rs` with helper fixtures for node IDs 
 - Negotiation never writes outside `/run/serial_lcd_cache` and config directory; manifests or transcripts stay in RAM.
 - Roles only affect which side processes command/file tunnel requests; LCD fallback screens remain identical to today’s behaviour when negotiation fails.
 - Milestone B does **not** expose new CLI flags; configuration stays confined to `config.toml` or compile-time defaults.
+
+## Allowed crates & dependencies
+
+Milestone B uses the same charter-approved crates as the rest of the daemon: `std`, `serde`, `serde_json`, `crc32fast`, `hd44780-driver`, `serialport`, optional `tokio`/`tokio-serial` via the existing feature flag, `rppal`, `linux-embedded-hal`, `ctrlc`, plus in-tree logging utilities. The capability bitmask uses plain `u32` helpers specifically to avoid introducing `bitflags` or other new dependencies.
 
 Delivering Milestone B ensures every subsequent milestone (command tunnel, file transfer, heartbeat) can assume a well-defined server/client split without manual setup.

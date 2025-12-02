@@ -1,8 +1,24 @@
 use crate::{config::Pcf8574Addr, Error, Result};
 
+/// Entry mode for the `run` command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunMode {
+    /// Default daemon path that renders onto the LCD.
+    Daemon,
+    /// P7: CLI integration groundwork for the serial shell preview gate.
+    SerialShell,
+}
+
+impl Default for RunMode {
+    fn default() -> Self {
+        RunMode::Daemon
+    }
+}
+
 /// Options for the `run` command; values are `None` when not provided on CLI.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RunOptions {
+    pub mode: RunMode,
     pub device: Option<String>,
     pub baud: Option<u32>,
     pub cols: Option<u8>,
@@ -51,6 +67,7 @@ impl Command {
         }
     }
 
+    #[cfg(not(feature = "serialsh"))]
     pub fn help() -> &'static str {
         concat!(
             "lifelinetty - Serial-to-LCD daemon\n",
@@ -72,6 +89,34 @@ impl Command {
             "  --log-level <error|warn|info|debug|trace>  Log verbosity (default: info)\n",
             "  --log-file <path>              Append logs inside /run/serial_lcd_cache (also honors LIFELINETTY_LOG_PATH)\n",
             "  --demo                         Run built-in demo pages on the LCD (no serial input)\n",
+            "  -h, --help        Show this help\n",
+            "  -V, --version     Show version\n",
+        )
+    }
+
+    #[cfg(feature = "serialsh")]
+    pub fn help() -> &'static str {
+        concat!(
+            "lifelinetty - Serial-to-LCD daemon\n",
+            "\n",
+            "USAGE:\n",
+            "  lifelinetty run [--device <path>] [--baud <number>] [--cols <number>] [--rows <number>] [--payload-file <path>] [--serialsh]\n",
+            "  lifelinetty --help\n",
+            "  lifelinetty --version\n",
+            "\n",
+            "OPTIONS:\n",
+            "  --device <path>   Serial device path (default: /dev/ttyUSB0)\n",
+            "  --baud <number>   Baud rate (default: 9600)\n",
+            "  --cols <number>   LCD columns (default: 20)\n",
+            "  --rows <number>   LCD rows (default: 4)\n",
+            "  --payload-file <path>  Load a local JSON payload and render it once (testing helper)\n",
+            "  --backoff-initial-ms <number>  Initial reconnect backoff (default: 500)\n",
+            "  --backoff-max-ms <number>      Maximum reconnect backoff (default: 10000)\n",
+            "  --pcf8574-addr <auto|0xNN>     PCF8574 I2C address or 'auto' to probe (default: auto)\n",
+            "  --log-level <error|warn|info|debug|trace>  Log verbosity (default: info)\n",
+            "  --log-file <path>              Append logs inside /run/serial_lcd_cache (also honors LIFELINETTY_LOG_PATH)\n",
+            "  --demo                         Run built-in demo pages on the LCD (no serial input)\n",
+            "  --serialsh                     Experimental serial shell client (requires --features serialsh)\n",
             "  -h, --help        Show this help\n",
             "  -V, --version     Show version\n",
         )
@@ -141,6 +186,11 @@ fn parse_run_options(iter: &mut std::slice::Iter<String>) -> Result<RunOptions> 
             "--demo" => {
                 opts.demo = true;
             }
+            #[cfg(feature = "serialsh")]
+            "--serialsh" => {
+                // P7: expose the serial shell gate while milestone A wiring lands.
+                opts.mode = RunMode::SerialShell;
+            }
             other => {
                 return Err(Error::InvalidArgs(format!(
                     "unknown flag '{other}', try --help"
@@ -149,6 +199,7 @@ fn parse_run_options(iter: &mut std::slice::Iter<String>) -> Result<RunOptions> 
         }
     }
 
+    validate_serialsh_options(&opts)?;
     Ok(opts)
 }
 
@@ -156,6 +207,23 @@ fn take_value(flag: &str, iter: &mut std::slice::Iter<String>) -> Result<String>
     iter.next()
         .cloned()
         .ok_or_else(|| Error::InvalidArgs(format!("expected a value after {flag}")))
+}
+
+#[cfg(feature = "serialsh")]
+fn validate_serialsh_options(opts: &RunOptions) -> Result<()> {
+    if matches!(opts.mode, RunMode::SerialShell)
+        && (opts.payload_file.is_some() || opts.demo)
+    {
+        return Err(Error::InvalidArgs(
+            "--serialsh cannot be combined with --demo or --payload-file".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "serialsh"))]
+fn validate_serialsh_options(_opts: &RunOptions) -> Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]
@@ -195,6 +263,7 @@ mod tests {
             "--demo".into(),
         ];
         let expected = RunOptions {
+            mode: RunMode::Daemon,
             device: Some("/dev/ttyUSB0".into()),
             baud: Some(9600),
             cols: Some(16),
@@ -220,6 +289,7 @@ mod tests {
             "/tmp/payload.json".into(),
         ];
         let expected = RunOptions {
+            mode: RunMode::Daemon,
             device: Some("/dev/ttyS1".into()),
             baud: None,
             cols: None,
@@ -248,5 +318,32 @@ mod tests {
         let args = vec!["--nope".into()];
         let err = Command::parse(&args).unwrap_err();
         assert!(format!("{err}").contains("unknown flag"));
+    }
+
+    #[cfg(feature = "serialsh")]
+    #[test]
+    fn parse_serialsh_flag_sets_mode() {
+        let args = vec!["--serialsh".into(), "--device".into(), "fake".into()];
+        let cmd = Command::parse(&args).unwrap();
+        match cmd {
+            Command::Run(opts) => assert!(matches!(opts.mode, RunMode::SerialShell)),
+            other => panic!("expected Run variant, got {other:?}"),
+        }
+    }
+
+    #[cfg(feature = "serialsh")]
+    #[test]
+    fn serialsh_disallows_demo_and_payload_file() {
+        let args = vec!["--serialsh".into(), "--demo".into()];
+        let err = Command::parse(&args).unwrap_err();
+        assert!(format!("{err}").contains("serialsh"));
+
+        let args = vec![
+            "--serialsh".into(),
+            "--payload-file".into(),
+            "payload.json".into(),
+        ];
+        let err = Command::parse(&args).unwrap_err();
+        assert!(format!("{err}").contains("serialsh"));
     }
 }

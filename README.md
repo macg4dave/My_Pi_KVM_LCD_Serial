@@ -232,6 +232,7 @@ Reload config without restarting the daemon:
 | `--log-level <error\|warn\|info\|debug\|trace>` | Verbosity for stderr/file logs. | `info` (also configurable via `LIFELINETTY_LOG_LEVEL`). |
 | `--log-file <path>` | Append logs to a file inside `/run/serial_lcd_cache` (also honors `LIFELINETTY_LOG_PATH`). | No file logging unless you provide a cache-rooted path. |
 | `--demo` | Run built-in demo pages to validate wiring—no serial input required. | Disabled by default. |
+| `--serialsh` | (P7) Experimental serial command shell flag gated behind the `serialsh` Cargo feature. | Build with `cargo build --features serialsh` to parse the flag; currently returns a placeholder error until Milestone A ships. |
 | `--help` / `--version` | Display usage or the crate version. | Utility flags that never touch hardware. |
 
 ### Serial precedence cheatsheet
@@ -240,6 +241,8 @@ Reload config without restarting the daemon:
 - If a flag is omitted, the daemon falls back to `~/.serial_lcd/config.toml`.
 - When both CLI and config omit a setting, the built-in defaults apply: `/dev/ttyUSB0` @ 9600 8N1, 20×4 LCD.
 - Alternate Linux UARTs like `/dev/ttyAMA0`, `/dev/ttyS0`, or USB adapters work equally well—point the CLI flag or config entry at the path you need.
+
+> 💡 **Serial shell preview (P7)**: The `serialsh` Cargo feature only enables argument parsing plus a friendly “not yet wired” error so we can stage Milestone A. Default release builds keep the flag hidden; don’t rely on it for production until the command tunnel is complete.
 
 ---
 

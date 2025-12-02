@@ -1,5 +1,5 @@
 use crate::{
-    cli::RunOptions,
+    cli::{RunMode, RunOptions},
     config::Pcf8574Addr,
     config::{Config, DEFAULT_BAUD, DEFAULT_COLS, DEFAULT_DEVICE, DEFAULT_ROWS},
     lcd::Lcd,
@@ -181,6 +181,7 @@ mod tests {
     fn config_from_options() {
         let home = set_temp_home();
         let opts = RunOptions {
+            mode: RunMode::Daemon,
             device: Some("/dev/ttyUSB1".into()),
             baud: Some(57_600),
             cols: Some(16),
