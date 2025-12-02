@@ -26,12 +26,11 @@ LifelineTTY is the successor to SerialLCD: a single Rust daemon for Raspberry Pi
 
 | ID  | Title & scope (inline guardrails) |
 |-----|----------------------------------|
-| **P1** | **Repo-wide rename + lint**: resolve B1 in code/tests/docs; run `cargo fmt`, `cargo clippy` to prove no stale identifiers remain. |
-| **P2** | **Baud / CLI defaults audit**: codify `/dev/ttyUSB0 @ 9600` as the baseline, ensure config/CLI overrides cover `/dev/ttyAMA0`/`ttyS*` devices, and add integration tests in `tests/bin_smoke.rs` for precedence + persistence. |
-| **P3** | **Config loader hardening**: enhance `src/config/loader.rs` to validate cols/rows ranges, default scroll/page timings, and ensure `~/.serial_lcd/config.toml` schema doc matches real struct. |
-| **P4** | **LCD driver regression tests**: expand `src/lcd_driver` tests for flicker-free updates, blinking, and icon resets; ensure no `unsafe`. |
-| **P5** | **Serial backoff telemetry**: add structured logging to `src/serial/*` capturing reconnect counts into `/run/serial_lcd_cache/*.log`, respecting RAM-only constraint. |
-| **P6** | **State machine metrics**: instrument `src/app/render_loop.rs` with counters for frames accepted/rejected (already defined) and expose via CLI `--test-serial` output without breaking protocol. |
+| **P1 (✅ 2 Dec 2025)** | **Repo-wide rename + lint**: resolve B1 in code/tests/docs; run `cargo fmt`, `cargo clippy` to prove no stale identifiers remain. |
+| **P2 (✅ 2 Dec 2025)** | **Baud / CLI defaults audit**: codify `/dev/ttyUSB0 @ 9600` as the baseline, ensure config/CLI overrides cover `/dev/ttyAMA0`/`ttyS*` devices, and add integration tests in `tests/bin_smoke.rs` for precedence + persistence. |
+| **P3 (✅ 2 Dec 2025)** | **Config loader hardening**: enhance `src/config/loader.rs` to validate cols/rows ranges, default scroll/page timings, and ensure `~/.serial_lcd/config.toml` schema doc matches real struct. |
+| **P4 (✅ 2 Dec 2025)** | **LCD driver regression tests**: expand `src/lcd_driver` tests for flicker-free updates, blinking, and icon resets; ensure no `unsafe`. |
+| **P5 (✅ 2 Dec 2025)** | **Serial backoff telemetry**: add structured logging to `src/serial/*` capturing reconnect counts into `/run/serial_lcd_cache/serial_backoff.log`, respecting RAM-only constraint. |
 | **P7** | **CLI integration mode groundwork**: design `serialsh` pseudo-shell behaviour within current CLI (`lifelinetty --run --serialsh` placeholder flag) while keeping contract stable; gated behind feature flag until milestone ready. |
 | **P8** | **Bi-directional command tunnel core**: base framing library in `src/payload/parser.rs` for command request/response envelopes (no network). Must reuse newline JSON framing. |
 | **P9** | **Server/client auto-negotiation**: implement handshake state in `src/app/connection.rs`, ensuring deterministic fallback to current behaviour when remote does not understand negotiation packets. |
@@ -87,18 +86,18 @@ LifelineTTY is the successor to SerialLCD: a single Rust daemon for Raspberry Pi
   4. Extend CLI with `--push`/`--pull` commands (documented but disabled until stable) and cover with integration tests using fixtures in `tests/integration_mock.rs`.
 - **Crates & tooling**: `crc32fast` (already in tree) for chunk verification, `serialport` / `tokio-serial` for transport, consider `anyhow` for layered error propagation.
 
-### Milestone D — Live Hardware Polling + Heartbeat/Watchdog
+### Milestone D — Live Hardware Polling
 
-- **Goal**: gather CPU/mem/temp/disk/network metrics and stream to LCD, plus heartbeat watchdog resets if remote silent.
-- **Scope**: polling threads in `src/app/demo.rs` or new module, config toggles, heartbeat state in render loop.
+- **Goal**: gather CPU/mem/temp/disk/network metrics
+- **Scope**: gather metrics from hosts system of cpu/mem/temp/disk.
 - **Dependencies**: P11, P15, P18.
-- **Constraints**: polling intervals must be configurable; watchdog actions limited to LCD overlays or local scripts (no rebooting the Pi without systemd coordination).
+- **Constraints**: polling intervals must be configurable
 - **Workflow**:
-  1. Build polling module (e.g., `src/app/polling.rs`) that reads `/proc` and `/sys` metrics with non-blocking IO.
+  1. Build polling module with systemstat crate or (e.g., `src/app/polling.rs`) that reads `/proc` and `/sys` metrics with non-blocking IO.
   2. Publish metrics into render queue via channels guarded by `std::sync::mpsc` or `crossbeam` (if later approved) to avoid blocking serial ingestion.
   3. Implement heartbeat packets (serde structs) and integrate into render loop timers; fallback to offline screen if missed.
   4. Add config knobs in `config.toml` and tests verifying defaults + overrides.
-- **Crates & tooling**: standard library (`std::fs`, `std::time`), `linux-embedded-hal` (if GPIO-based sensors), `log` for watchdog alerts, optional `tokio` timers if async polling chosen.
+- **Crates & tooling**: standard library (`std::fs`, `std::time`), `linux-embedded-hal` (if GPIO-based sensors), `log` for watchdog alerts, optional `tokio` timers if async polling chosen. systemstat or similar crate for metrics gathering.
 
 ### Milestone E — LCD/Display Output Mode Expansion
 

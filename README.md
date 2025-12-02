@@ -189,6 +189,8 @@ scroll_speed_ms = 250
 page_timeout_ms = 4000
 pcf8574_addr = "auto"
 button_gpio_pin = null
+backoff_initial_ms = 500
+backoff_max_ms = 10000
 ```
 
 Reload config without restarting the daemon:
@@ -204,7 +206,14 @@ Reload config without restarting the daemon:
 - Persistent settings live at `~/.serial_lcd/config.toml` (auto-created the first time you run the daemon).
 - Everything else (logs, payload caches, telemetry snapshots, LCD caches) belongs in the RAM disk mounted at `/run/serial_lcd_cache`. The provided systemd unit already restricts writes to that directory.
 - The `--log-file` flag and `LIFELINETTY_LOG_PATH` environment variable only accept paths inside `/run/serial_lcd_cache`. Provide an absolute cache path or a relative name (e.g., `logs/runtime.log`) and the daemon will place it under the cache root.
+- Reconnect telemetry is automatically appended to `/run/serial_lcd_cache/serial_backoff.log` as newline-delimited JSON (phase, device, baud, attempt counts).
 - `/run/serial_lcd_cache` is wiped on reboot—treat it as ephemeral scratch space.
+
+### Config validation rules
+
+- `cols` must be between 8 and 40; `rows` must be between 1 and 4 to match HD44780 glass sizes.
+- `scroll_speed_ms` must be at least 100 ms and `page_timeout_ms` must be at least 500 ms so watchdog UI remains responsive.
+- Invalid values are rejected on startup with a clear error; use the defaults above if you are unsure.
 
 ## CLI reference
 
@@ -224,6 +233,13 @@ Reload config without restarting the daemon:
 | `--log-file <path>` | Append logs to a file inside `/run/serial_lcd_cache` (also honors `LIFELINETTY_LOG_PATH`). | No file logging unless you provide a cache-rooted path. |
 | `--demo` | Run built-in demo pages to validate wiring—no serial input required. | Disabled by default. |
 | `--help` / `--version` | Display usage or the crate version. | Utility flags that never touch hardware. |
+
+### Serial precedence cheatsheet
+
+- CLI flags (`--device`, `--baud`) always win for the current process.
+- If a flag is omitted, the daemon falls back to `~/.serial_lcd/config.toml`.
+- When both CLI and config omit a setting, the built-in defaults apply: `/dev/ttyUSB0` @ 9600 8N1, 20×4 LCD.
+- Alternate Linux UARTs like `/dev/ttyAMA0`, `/dev/ttyS0`, or USB adapters work equally well—point the CLI flag or config entry at the path you need.
 
 ---
 

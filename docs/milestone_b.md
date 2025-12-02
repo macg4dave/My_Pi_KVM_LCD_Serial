@@ -1,98 +1,47 @@
+# 📌 Milestone B — Auto-negotiation: server/client role resolution (Rust-native, async, framed)
 
-Draft specification for the Milestone B of the LifelineTTY project.
-NOTE: This is not code to be executed, but rather documentation describing design ideas and architecture of the feature my be implemented
----
+*Draft specification for Milestone B of the LifelineTTY project. This file documents design intent only—no code here is executable.*
 
-# **📌 Milestone B — Auto-Negotiation: Server/Client Role Resolution (Rust-Native, Async, Framed)**
+## Outcome
 
-**Goal**
-Make both LifelineTTY endpoints boot with zero configuration.
-When the serial link comes up, the two units **negotiate roles** and agree on:
+Enable two LifelineTTY endpoints to connect with zero manual configuration, decide deterministically which node acts as **server** (runs commands and drives LCD policy) and which acts as **client** (issues tunnel requests), and fall back gracefully to legacy LCD-only mode if the peer does not negotiate. This milestone implements roadmap item **P9** and feeds directly into milestones A (command tunnel) and C (file transfer).
 
-* **Server** — runs commands, streams stdout/stderr, drives LCD logic when appropriate
-* **Client** — issues command requests
-* **Fallback** — behaves in “LCD-only” legacy mode if the remote side doesn’t support negotiation
+## Success criteria
 
-Everything is built on top of Milestone A’s framed JSON/CBOR + CRC32 transport.
+- Each endpoint emits a `Hello` control frame within 250 ms of opening the UART.
+- Negotiation converges in ≤2 round-trips (or ≤1 s) under normal conditions; otherwise we enter `LcdOnlyFallback` automatically.
+- Both peers agree on the same chosen role using deterministic tie-breakers (node IDs, preferences) and log the decision.
+- Unknown capability bits or version mismatches never crash the daemon; they downgrade to the safest compatible behaviour.
+- LCD rendering stays paused until a role is finalized, ensuring the display never shows stale or competing content.
 
----
+## Dependencies & prerequisites
 
-# **🎯 Design Principles (Rust-ified ser2net lessons)**
+1. Milestone A framing (`TunnelMsg`) supplies CRC-checked transport for control-plane traffic.
+2. Roadmap items **P5** (serial backoff telemetry) and **P8** (tunnel framing) remain untouched but continue to log serial health.
+3. Node identifiers are persisted in `~/.serial_lcd/config.toml` so both peers have stable IDs; loader validation from **P3** applies here.
 
-We borrow concepts from ser2net’s architecture — but **never its byte-passthrough design**.
+## Architecture overview
 
-✔ Clear layering (backend → framing → control-plane → data-plane)
-✔ A single “connection task" owns the serial port (no sharing)
-✔ Deterministic state machine (negotiation → active)
-✔ Strict framed communication, not arbitrary byte-stream
-✔ Full async, no blocking, no PTYs, no networking
-✔ Resilient against partial frames, timeouts, unknown capabilities
-✔ Always falls back to safe LCD mode
+- **Lifecycle FSM (`src/app/lifecycle.rs`)** — introduces `LifecycleState::{Negotiating, Active(NegotiatedRole)}` with timeout + retry bookkeeping. Negotiation runs once at startup or after serial reconnects.
+- **Connection driver (`src/app/connection.rs`)** — owns the serial backend, emits `Hello`, listens for control frames, and invokes the FSM’s decision helpers.
+- **Render loop gating (`src/app/render_loop.rs`)** — blocks LCD updates and tunnel traffic until `Active` with either Server/Client role or fallback.
+- **Payload schema (`src/payload/schema.rs`)** — defines `ControlMsg`, `Capabilities` bitflags, `RolePreference`, and `NegotiatedRole`, all serialized via serde and validated with unit tests.
+- **Testing harness (`tests/fake_serial_loop.rs`)** — uses `tokio::io::duplex` pairs to simulate two devices, race conditions, and error cases without hardware.
 
----
-
-# **📦 Crates Used**
-
-* `tokio` — async runtime, `select!`, timers
-* `tokio-serial` — UART backend
-* `bitflags` — capability map
-* `serde`, `serde_json` or `serde_cbor` — handshake/control message serialization
-* `crc32fast` — use the same framing from Milestone A
-* `thiserror` — structured negotiation errors
-* `tracing` — debug/trace logs
-* `bytes` — buffer mgmt for partial frames
-
-All safe, stable Rust crates.
-
----
-
-# **📚 Codebase Integration**
-
-```
-src/
- ├ app/
- │   ├ lifecycle.rs        # NEW: negotiation FSM + role state
- │   ├ connection.rs       # serial open + negotiation driver
- │   ├ render_loop.rs      # delays LCD until role established
- │   ├ events.rs           # command execution (Mile A)
- │   └ heartbeat.rs
- ├ payload/
- │   ├ schema.rs           # NEW: ControlMsg, Capability bits
- │   ├ parser.rs           # framing extended for control msgs
- ├ serial/
- │   └ backend.rs          # tokio-serial wrapper
-tests/
- └ fake_serial_loop.rs     # two-endpoint negotiation simulation
-```
-
----
-
-# **🧩 1. Capabilities (bitflags)**
-
-Use `bitflags` for capability negotiation.
+## Control-plane protocol
 
 ```rust
 bitflags::bitflags! {
     #[derive(Serialize, Deserialize)]
     pub struct Capabilities: u32 {
-        const HANDSHAKE_V1    = 0b00000001;
-        const CMD_TUNNEL_V1   = 0b00000010;
-        const LCD_V2          = 0b00000100;
-        const HEARTBEAT_V1    = 0b00001000;
-        // Reserved future bits ignored gracefully
+        const HANDSHAKE_V1  = 0b0000_0001;
+        const CMD_TUNNEL_V1 = 0b0000_0010;
+        const LCD_V2        = 0b0000_0100;
+        const HEARTBEAT_V1  = 0b0000_1000;
+        const FILE_XFER_V1  = 0b0001_0000; // reserved for Milestone C
     }
 }
-```
 
-Unknown bits don’t break decoding.
-
----
-
-# **🧩 2. Control-Plane Messages**
-
-Transported using Milestone A’s framing (JSON/CBOR + CRC32 wrapper):
-
-```rust
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ControlMsg {
@@ -110,200 +59,47 @@ pub enum ControlMsg {
 }
 ```
 
-Preferences:
+- `proto_version` starts at `1`; newer nodes send both version and caps so older peers can downgrade.
+- Frames reuse Milestone A’s newline JSON + CRC envelope; invalid frames are logged and ignored.
 
-```rust
-#[derive(Serialize, Deserialize, Copy, Clone)]
-pub enum RolePreference {
-    PreferServer,
-    PreferClient,
-    NoPreference,
-}
+## Decision flow
 
-#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Role {
-    Server,
-    Client,
-}
+1. **Send HELLO** — after serial open, queue `Hello { node_id, caps, pref }` and start a negotiation deadline (default 1 s, configurable via `[negotiation] timeout_ms`).
+2. **Handle peer HELLO** — compare `node_id` and `RolePreference` to choose roles: higher `node_id` wins when both prefer the same role; explicit preferences override when peers disagree.
+3. **Emit HELLOACK** — confirm the chosen role with `HelloAck { chosen_role, peer_caps }` and transition to `Active(role)`.
+4. **Legacy detection** — if no valid control frames arrive before the deadline, emit `LegacyFallback`, set `Active(LcdOnlyFallback)`, and resume pre-milestone behaviour.
+5. **Retries** — failed negotiations retry up to 3 times with exponential backoff that respects existing serial backoff logic.
 
-pub enum NegotiatedRole {
-    Server,
-    Client,
-    LcdOnlyFallback,
-}
+## Configuration & logging
+
+- New optional table in `~/.serial_lcd/config.toml`:
+
+```toml
+[negotiation]
+node_id = 123456         # default derived from MAC-like hash
+preference = "prefer_server"  # or "prefer_client" / "no_preference"
+timeout_ms = 1000
 ```
 
----
+- Missing values fall back to safe defaults validated in `src/config/loader.rs` (alignment with P3).
+- Decision logs go to stderr and `/run/serial_lcd_cache/logs/negotiation.log`, trimmed on startup.
 
-# **🧠 3. Lifecycle FSM (`src/app/lifecycle.rs`)**
+## Testing & validation
 
-```rust
-pub enum LifecycleState {
-    Negotiating(NegState),
-    Active(NegotiatedRole),
-}
+1. **Happy path** — both peers send HELLO concurrently; verify deterministic tie-breaker and matching `NegotiatedRole`.
+2. **Legacy peer** — only one side speaks control-plane frames; expect fallback after timeout with LCD-only behaviour.
+3. **Version mismatch** — simulate `proto_version = 2` vs `1`; ensure downgrade and capability masking.
+4. **Unknown capability bits** — set future bits; serde must ignore them while preserving known flags.
+5. **Collision + retries** — drop `HelloAck` on one side to exercise retry loop and ensure state machine recovers.
+6. **Broken link** — close serial mid-negotiation and confirm we re-enter `Negotiating` on reconnect.
 
-pub struct NegState {
-    pub sent_hello: bool,
-    pub retries: u8,
-    pub deadline: tokio::time::Instant,
-    pub caps: Capabilities,
-    pub pref: RolePreference,
-    pub node_id: u32,
-}
-```
+All tests live in `tests/fake_serial_loop.rs` with helper fixtures for node IDs and capability masks.
 
-### State Transition Summary
+## Guardrails & out-of-scope items
 
-* On open: → `Negotiating`
-* Send HELLO immediately
-* Wait for peer HELLO or HELLOACK
-* Resolve collisions with deterministic tie-breaker:
+- No sockets, PTYs, or extra threads; negotiation happens inside the existing async runtime.
+- Negotiation never writes outside `/run/serial_lcd_cache` and config directory; manifests or transcripts stay in RAM.
+- Roles only affect which side processes command/file tunnel requests; LCD fallback screens remain identical to today’s behaviour when negotiation fails.
+- Milestone B does **not** expose new CLI flags; configuration stays confined to `config.toml` or compile-time defaults.
 
-  ```
-  if local_node_id > remote_node_id → local=Server
-  else → local=Client
-  ```
-
-* Send HelloAck
-* Transition to `Active(Server|Client)`
-* If timeout → `Active(LcdOnlyFallback)`
-* If unknown/garbage frames → ignore until timeout
-
----
-
-# **⚙️ 4. Negotiation Driver (`connection.rs`)**
-
-Sketch:
-
-```rust
-pub async fn negotiate_role(
-    serial: &mut SerialPortBackend,
-    local_caps: Capabilities,
-    local_pref: RolePreference,
-    node_id: u32,
-) -> Result<NegotiatedRole, NegotiationError> {
-
-    send_hello(...);
-
-    let deadline = Instant::now() + NEG_TIMEOUT;
-
-    loop {
-        tokio::select! {
-            frame = serial.recv_frame() => {
-                let msg = decode_control_or_ignore(frame)?;
-                match msg {
-                    ControlMsg::Hello { node_id: theirs, caps, pref, .. } => {
-                        // collision or one-sided
-                        let role = decide_role(node_id, theirs, local_pref, pref);
-                        send_hello_ack(role, caps)?;
-                        return Ok(map_role(role));
-                    }
-                    ControlMsg::HelloAck { chosen_role, .. } => {
-                        return Ok(map_role(chosen_role));
-                    }
-                    _ => {}
-                }
-            }
-
-            _ = tokio::time::sleep_until(deadline) => {
-                return Ok(NegotiatedRole::LcdOnlyFallback);
-            }
-        }
-    }
-}
-```
-
-All error types use `thiserror`.
-
----
-
-# **📉 5. Render Loop Integration (`render_loop.rs`)**
-
-Before role is established:
-
-* Do **not** send smart LCD updates or command-tunnel frames
-* Optional: show “connecting…” static image or just hold last-known LCD state
-* Once role is resolved → enable Milestone A’s logic
-
-If fallback:
-
-* Operate **exactly as old LCD mode**
-* Ignore all control messages after fallback
-
----
-
-# **📜 6. Tests (`tests/fake_serial_loop.rs`)**
-
-Simulate two endpoints using `tokio::io::duplex`.
-
-### Tests you must include
-
-#### ✔ Basic Successful Negotiation
-
-* Both send HELLO
-* Tie-breaker picks consistent Server/Client roles
-* Both transition to `Active`
-
-#### ✔ Legacy Partner (no handshake)
-
-* Only one sends HELLO
-* Other only sends legacy LCD messages / garbage
-* Timeout → `LcdOnlyFallback`
-
-#### ✔ Version mismatch
-
-* If proto_version incompatible → fallback
-* Test logs reflect mismatch
-
-#### ✔ Unknown capability bits
-
-* peer caps have upper bits set
-* decoder ignores them
-* negotiation still succeeds
-
-#### ✔ Hello collision race
-
-* Both send HELLO at the same instant
-* Deterministic node_id tie-break
-
-#### ✔ Broken peer (drops halfway)
-
-* Peer sends HELLO then disconnects
-* Local times out → fallback
-
----
-
-# **🧨 7. Safety Guarantees**
-
-* No PTY
-* No shell
-* No networking
-* Deterministic FSM
-* One task owns serial port
-* Strict framing + CRC + serde ensures correctness
-* Timeouts guarantee nothing hangs
-* Fallback mode guarantees LCD is never left blank
-* Fully async, safe Rust only
-
----
-
-# **🏁 Summary: What This Milestone Gives LifelineTTY**
-
-* Fully automatic role negotiation
-* Safe, robust fallback
-* Zero configuration
-* Clean separation of control-plane vs data-plane
-* Async FSM integrated with your serial reactor
-* Properly documented + testable behaviour
-* A future-proof, extensible basis for heartbeat, command tunneling, and LCD ops
-
----
-
-If you want, I can now generate:
-
-* **the exact Rust module skeletons**,
-* **the negotiation FSM code**,
-* or a **ZIP with all stubs pre-created** matching your repo layout.
-
-Say the word.
+Delivering Milestone B ensures every subsequent milestone (command tunnel, file transfer, heartbeat) can assume a well-defined server/client split without manual setup.

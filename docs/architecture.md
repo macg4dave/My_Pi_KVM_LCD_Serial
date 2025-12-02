@@ -8,7 +8,7 @@ Goal: a small daemon that converts local status into LCD lines over a serial lin
 - App (`src/app.rs`): owns configuration, opens serial, initializes LCD, and runs the refresh loop (to be implemented).
 - Serial (`src/serial.rs`): placeholder for UART transport; will frame and send bytes to the LCD controller or bridge MCU.
 - LCD (`src/lcd.rs`): placeholder for line/row writes and boot messages; will translate text into controller commands.
-- Config (`src/config.rs`): loads `~/.serial_lcd/config.toml`, merges with CLI overrides, and exposes resolved settings.
+- Config (`src/config.rs`): loads `~/.serial_lcd/config.toml`, merges with CLI overrides, and validates ranges (cols 8–40, rows 1–4, scroll ≥100 ms, page timeout ≥500 ms).
 
 ## Invariants to keep
 

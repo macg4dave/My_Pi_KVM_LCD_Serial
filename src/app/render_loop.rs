@@ -20,7 +20,7 @@ use crate::{
     },
     lcd::Lcd,
     payload::{Defaults as PayloadDefaults, RenderFrame},
-    serial::SerialPort,
+    serial::{telemetry::{log_backoff_event, BackoffPhase}, SerialPort},
     Error, Result,
 };
 use crc32fast::Hasher;
@@ -35,6 +35,26 @@ struct LoopStats {
     checksum_failures: u64,
     duplicates: u64,
     reconnects: u64,
+}
+
+fn log_backoff(
+    logger: &Logger,
+    phase: BackoffPhase,
+    attempt: u64,
+    delay_ms: u64,
+    backoff: &BackoffController,
+    config: &AppConfig,
+) {
+    if let Err(err) = log_backoff_event(
+        phase,
+        attempt,
+        delay_ms,
+        backoff.max_delay_ms(),
+        &config.device,
+        config.baud,
+    ) {
+        logger.debug(format!("telemetry write failed: {err}"));
+    }
 }
 
 /// Drive the main render loop: reads serial, rotates pages, scrolls text, handles reconnects.
@@ -121,6 +141,14 @@ pub(super) fn run_render_loop(
         if serial_connection.is_none() && backoff.should_retry(current_time) {
             let delay = backoff.current_delay_ms();
             stats.reconnects += 1;
+            log_backoff(
+                logger,
+                BackoffPhase::Attempt,
+                stats.reconnects,
+                delay,
+                &backoff,
+                config,
+            );
             logger.info(format!(
                 "reconnect attempt #{}, delay={}ms device={} baud={}",
                 stats.reconnects, delay, config.device, config.baud
@@ -134,6 +162,14 @@ pub(super) fn run_render_loop(
             }
             match attempt_serial_connect(logger, &config.device, config.baud) {
                 Some(p) => {
+                    log_backoff(
+                        logger,
+                        BackoffPhase::Success,
+                        stats.reconnects,
+                        delay,
+                        &backoff,
+                        config,
+                    );
                     serial_connection = Some(p);
                     backoff.mark_success(current_time);
                     lcd.clear()?;
@@ -142,7 +178,17 @@ pub(super) fn run_render_loop(
                     heartbeat_visible = false;
                     max_backoff_warned = false;
                 }
-                None => backoff.mark_failure(current_time),
+                None => {
+                    log_backoff(
+                        logger,
+                        BackoffPhase::Failure,
+                        stats.reconnects,
+                        delay,
+                        &backoff,
+                        config,
+                    );
+                    backoff.mark_failure(current_time)
+                }
             }
         }
 

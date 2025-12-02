@@ -1,231 +1,99 @@
-Draft specification for the Milestone A of the LifelineTTY project.
-NOTE: This is not code to be executed, but rather documentation describing design ideas and architecture of the feature my be implemented.
+# 📌 Milestone A — Bi-Directional Command Tunnel (Rust-native, async, framed)
 
-# **📌 Milestone A — Bi-Directional Command Tunnel (Rust-Native, Async, Framed)**
+*Draft specification for Milestone A of the LifelineTTY project. This file documents design intent only—no code here is executable.*
 
-**Goal:**
-Implement a **structured command/response tunnel over UART**, capable of:
+## Outcome
 
-* receiving JSON-framed command requests
-* executing allowed one-line commands locally
-* streaming structured stdout/stderr chunks back
-* maintaining session health with heartbeats
-* running concurrently with existing LCD serial traffic
+Deliver a single command/response tunnel running over the existing UART link so that the “client” LifelineTTY instance can submit short commands and receive stdout/stderr streams without breaking LCD updates. This milestone fulfills roadmap items **P7 (CLI groundwork), P8 (tunnel framing)**, and **P16 (CLI UX polish)**, and prepares the ground for heartbeat enforcement from Milestone D/P15.
 
-Zero networking. Zero PTYs. Zero C. Pure Rust + crates.
+## Success criteria
 
----
+- `lifelinetty --run --serialsh` (or config-gated equivalent) forwards one-line commands to the tunnel and exits with the remote process’ status code.
+- Structured frames (`TunnelMsg`) are newline-delimited JSON with CRC32 footers and reject malformed or oversized (>4 KB) payloads.
+- Only one active command session exists at a time; additional requests return `Busy` immediately.
+- LCD rendering and serial ingest remain responsive (<50 ms jitter per loop) while commands run.
+- All writes outside `/run/serial_lcd_cache` and `~/.serial_lcd/config.toml` are rejected.
 
-# **🎯 High-Level Architecture (inspired by ser2net’s layering but Rustified)**
+## Dependencies & prerequisites
 
-1. **Serial Backend Layer**
+1. Blockers B1–B6 and priorities P1–P4 are already complete (see `docs/roadmap.md`).
+2. CLI groundwork from **P7** defines the `--serialsh` gate; the flag stays hidden until Milestone A lands.
+3. Payload framing work from **P8** supplies the serde definitions, CRC helpers, and newline framing utilities.
+4. Heartbeat message schema from Milestone D (**P15**) is reused for session health.
 
-   * Owns UART fully.
-   * Provides `AsyncRead + AsyncWrite` abstraction over `tokio-serial`.
-   * Enforces chunked, buffered writes to avoid flooding.
-   * Single task owns the serial port, no sharing.
+## Architecture & layering
 
-2. **Framing Layer (JSON or CBOR + CRC32)**
+1. **Serial backend (`src/serial/backend.rs`)** — a single owner task wraps `tokio-serial`, exposing `AsyncRead + AsyncWrite` with bounded buffers and write pacing to stay within UART limits.
+2. **Framing (`src/payload/parser.rs`)** — converts newline-delimited byte streams into `{ msg, crc32 }` envelopes, validates CRC via `crc32fast`, and hands decoded `TunnelMsg<'_>` values upstream.
+3. **Command session FSM (`src/app/events.rs`)** — tracks `SessionState::{Idle, Running { pid }}` and enforces exclusivity. Busy responses are emitted immediately when `Running`.
+4. **Process executor (`tokio::process::Command`)** — spawns whitelisted binaries, captures stdout/stderr into 256–512 byte chunks, and stores temporary buffers in `/run/serial_lcd_cache/tunnel/` to respect RAM-only writes.
+5. **Multiplex loop (`src/app/render_loop.rs`)** — existing `tokio::select!` loop now observes serial RX, LCD refresh, stdout/stderr channels, and heartbeat timers without blocking; no additional runtimes.
 
-   * Serial bytes → newline-delimited frames → CRC check → serde decode.
-   * Structured messages only; no raw passthrough.
-   * Zero-copy where possible via borrowed slices.
-   * Upstream of serial, downstream of command executor.
+## Module impact
 
-3. **Command Session Layer (FSM)**
+| File | Change |
+| --- | --- |
+| `src/app/connection.rs` | Initialize tunnel channels, own the serial backend, and surface CRC/framing errors as structured events. |
+| `src/app/events.rs` | Implement session FSM, command validation, and stdout/stderr forwarding. |
+| `src/app/render_loop.rs` | Multiplex LCD frames with tunnel traffic and heartbeats. |
+| `src/cli.rs` | Gate `--serialsh` (feature flag) and document failure modes without changing default CLI semantics. |
+| `src/payload/{parser.rs,schema.rs}` | Add `TunnelMsg` enums with borrowed data plus CRC wrappers and serde tests. |
+| `tests/bin_smoke.rs` & `tests/integration_mock.rs` | Cover framing, Busy state, CRC rejection, command success/failure paths, and LCD coexistence using `tokio::io::duplex`. |
 
-   * Simple finite-state machine: `Idle` → `Running(pid)` → `Exit` → `Idle`.
-   * Only one active command at a time.
-   * Rejects additional requests when busy.
-   * Handles timeouts, exit codes, cleanup.
-
-4. **Process Execution Layer**
-
-   * Uses `tokio::process::Command`.
-   * Streams stdout/stderr back in bounded 256–512 byte chunks.
-   * Resource controlled: tiny working dir, capped buffers, no stdin, no PTY.
-
-5. **Multiplex Loop**
-
-   * One `tokio::select!` loop handles:
-
-     * serial RX
-     * stdout chunks
-     * stderr chunks
-     * LCD updates
-     * heartbeat timer
-
-Everything runs under the same user with minimal RSS.
-
----
-
-# **📦 Required Rust Crates**
-
-* `tokio` — async runtime, tasks, timers, select loop
-* `tokio-serial` — async serial I/O backend
-* `serde` + `serde_json` or `serde_cbor` — framing layer
-* `crc32fast` — fast checksums
-* `thiserror` — error types
-* `tracing` — structured logs
-* `tokio::process` — streaming child processes
-* `bytes` — buffer mgmt for chunked IO
-* `tokio::sync::mpsc` — stdout/stderr channels
-
-100% safe Rust. No FFI.
-
----
-
-# **📂 File/Layout Impact (updated)**
-
-```
-src/
- ├ app/
- │   ├ connection.rs        # manages serial port backend + async reactor
- │   ├ render_loop.rs       # now multiplexes LCD + tunnel traffic
- │   ├ events.rs            # FSM + command executor + session control
- │   └ heartbeat.rs         # heartbeat tracker (Milestone D)
- ├ payload/
- │   ├ parser.rs            # framing encode/decode + CRC
- │   ├ schema.rs            # serde enums using Cow<'a>
- │   └ mod.rs
- ├ serial/
- │   └ backend.rs           # wrapper struct over tokio-serial
-```
-
----
-
-# **📜 Protocol / Schema (Rust-native)**
-
-### Enum for requests/responses
+## Protocol & framing
 
 ```rust
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum TunnelMsg<'a> {
     CmdRequest { cmd: Cow<'a, str> },
-    Stdout     { chunk: Cow<'a, [u8]> },
-    Stderr     { chunk: Cow<'a, [u8]> },
-    Exit       { code: i32 },
+    Stdout { chunk: Cow<'a, [u8]> },
+    Stderr { chunk: Cow<'a, [u8]> },
+    Exit { code: i32 },
     Busy,
     Heartbeat,
 }
 ```
 
-### Framing
+- Frames are newline-delimited JSON objects containing `{ "msg": <TunnelMsg>, "crc32": <u32> }`.
+- Frames larger than 4096 bytes or with mismatched CRCs are dropped and logged to `/run/serial_lcd_cache/tunnel/errors.log`.
+- Borrowed variants (`Cow<'a, str>` / `Cow<'a, [u8]>`) avoid heap churn while parsing.
 
-* Line-delimited JSON or CBOR
-* Outer wrapper contains CRC32 of raw `msg` bytes:
+## Session flow
 
-```json
-{ "msg": { ... }, "crc32": 123456789 }
-```
+1. Client sends `CmdRequest { cmd }` while in `Idle`.
+2. Server validates command against a static allow-list (paths, length, UTF-8) and enters `Running { pid }`.
+3. Executor streams stdout/stderr through `tokio::sync::mpsc` channels as `Stdout`/`Stderr` frames.
+4. On child exit, server emits `Exit { code }`, returns to `Idle`, and acknowledges via heartbeat.
+5. If another `CmdRequest` arrives during `Running`, immediately reply with `Busy`.
+6. Heartbeat misses (handled via Milestone D) tear down the session and surface an error to the CLI.
 
-* Reject on mismatch
-* Hard size cap: max 4 KB frame input
+## CLI, config, and cache usage
 
----
+- No new persistent config keys. The tunnel is enabled either via `--serialsh` or a documented `[tunnel] enable = true` config table that defaults to false.
+- Temporary buffers, stdout/stderr logs, and executor scratch files live under `/run/serial_lcd_cache/tunnel/`. The directory is cleaned at start/stop.
+- Command allow-list resides in `~/.serial_lcd/config.toml` as documented arrays, validated on load (leveraging P3 config hardening).
+- The service never mounts filesystems, launches PTYs, or spawns shells; commands are invoked directly with arguments split client-side.
 
-# **🧠 Session Logic (FSM)**
+## Testing & validation
 
-State lives in `events.rs`:
+1. **Unit tests (`src/payload/parser.rs`)** — CRC happy-path, CRC failure, and 4 KB cap enforcement.
+2. **FSM tests (`src/app/events.rs`)** — Idle→Running→Exit transitions, Busy branch, heartbeat-triggered aborts.
+3. **Integration tests (`tests/bin_smoke.rs`, `tests/integration_mock.rs`)** — use `tokio::io::duplex` to emulate serial, covering stdout-only, stderr-only, mixed output, checksum mismatch, partial frame reconstruction, and large file streaming.
+4. **CLI smoke (`tests/bin_smoke.rs`)** — `lifelinetty --serialsh --device fake0 --demo` returns expected exit codes and respects config overrides.
+5. **Resource budget checks** — ensure RSS stays under 5 MB on Raspberry Pi 1 by bounding chunk buffers and using streaming IO.
 
-```rust
-enum SessionState {
-    Idle,
-    Running { pid: u32 },
-}
-```
+## Observability & guardrails
 
-Rules:
+- All tunnel logs go to stderr (systemd journal) or `/run/serial_lcd_cache/tunnel/trace.log`.
+- `tracing` spans mark each frame, command, and child PID for later troubleshooting.
+- Serial backoff metrics (from P5) continue to apply; tunnel commands never bypass the retry policy.
+- No networking, PTYs, or additional daemons are introduced.
 
-* If `Idle` + `CmdRequest` → spawn → Running
-* If `Running` + `CmdRequest` → send `Busy`
-* Heartbeat resets timeout
-* Exit code = drop to Idle
+## Out of scope
 
-No interleaving. No multi-command batching.
+- Multi-command pipelines, shell-style redirection, or background jobs.
+- Compression (Milestone E) and negotiation (Milestone B) logic beyond ensuring frames coexist.
+- Any writes outside RAM disk or `~/.serial_lcd/config.toml`.
 
----
-
-# **⚙️ Command Execution Workflow**
-
-1. Parse command request
-2. Validate:
-
-   * must be one line
-   * must refer only to whitelisted binaries or paths
-3. Spawn child via `tokio::process::Command`
-4. Create two tasks:
-
-   * stdout reader → sends `Stdout` chunks
-   * stderr reader → sends `Stderr` chunks
-5. On exit:
-
-   * send `Exit { code }`
-   * FSM → Idle
-
-All output is streamed, never buffered.
-
----
-
-# **🔄 Multiplexer Loop (main engine)**
-
-Inside `render_loop.rs`:
-
-```rust
-tokio::select! {
-    // incoming serial frames
-    Ok(frame) = serial_rx.recv() => handle_frame(frame),
-
-    // outgoing chunks from processes
-    Some(out) = stdout_rx.recv() => serial_tx.send(out),
-    Some(err) = stderr_rx.recv() => serial_tx.send(err),
-
-    // LCD updates
-    _ = lcd_tick.tick() => render_lcd(),
-
-    // heartbeat
-    _ = heartbeat_tick.tick() => check_session_health(),
-}
-```
-
-The entire program behaves like a deterministic I/O reactor — tight, predictable, safe.
-
----
-
-# **🧪 Tests (improved)**
-
-`tests/bin_smoke.rs` now verifies:
-
-* command request → stdout stream → exit code round-trip
-* stderr-only cases
-* mixed stdout/stderr
-* checksum mismatch
-* partial-frame reconstruction
-* Busy-state correctness
-* Large output (file dump) yields chunked frames
-* Heartbeat timeout aborts child process
-
-Use `tokio::io::duplex` to simulate fake serial.
-
----
-
-# **📉 Memory + Safety Guarantees**
-
-* No PTY → no TTY line-discipline, eliminating whole class of bugs
-* No shell → no injection
-* Max frame size → bounded parsing
-* Chunked IO → high control and tiny RSS
-* Only one active command → deterministic state
-* One owner of serial port → no races
-* Pure async Rust → zero unsafe blocks
-
-This is **far cleaner and safer than ser2net**, while still using some of its architectural lessons.
-
----
-
-If you want, I can now write:
-
-* the **full protocol spec**
-* the **exact trait definition for the serial backend**
-* or a **complete Rust prototype** you can paste in your repo.
+Delivering Milestone A with these guardrails keeps the daemon deterministic, memory-efficient, and ready for the negotiation, file-transfer, and heartbeat features that follow.

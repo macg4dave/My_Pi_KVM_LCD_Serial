@@ -328,12 +328,50 @@ mod tests {
     #[derive(Debug, Default)]
     struct MockBus {
         writes: Vec<(u8, u8)>,
+        decoded: Vec<DecodedByte>,
+        pending_enable: Option<(bool, u8)>,
+        partial_byte: Option<(bool, u8)>,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct DecodedByte {
+        rs: bool,
+        value: u8,
     }
 
     impl I2cBus for MockBus {
         fn write_byte(&mut self, addr: u8, byte: u8) -> Result<()> {
+            if byte & MASK_E != 0 {
+                self.pending_enable = Some((byte & MASK_RS != 0, byte));
+            } else if let Some((rs, prev)) = self.pending_enable.take() {
+                let nibble = (prev & 0xF0) >> 4;
+                self.record_nibble(rs, nibble);
+            }
             self.writes.push((addr, byte));
             Ok(())
+        }
+    }
+
+    impl MockBus {
+        fn record_nibble(&mut self, rs: bool, nibble: u8) {
+            if let Some((prev_rs, prev)) = self.partial_byte.take() {
+                debug_assert_eq!(prev_rs, rs);
+                let value = (prev << 4) | nibble;
+                self.decoded.push(DecodedByte { rs, value });
+            } else {
+                self.partial_byte = Some((rs, nibble));
+            }
+        }
+
+        fn take_decoded_commands(&mut self) -> Vec<u8> {
+            let cmds: Vec<u8> = self
+                .decoded
+                .iter()
+                .filter(|d| !d.rs)
+                .map(|d| d.value)
+                .collect();
+            self.decoded.clear();
+            cmds
         }
     }
 
@@ -405,5 +443,41 @@ mod tests {
         // Cursor remains valid
         driver.putchar('\n').unwrap();
         assert_eq!(driver.cursor_y, 1); // newline advances to next line
+    }
+
+    #[test]
+    fn write_line_avoids_clear_between_updates() {
+        let mut driver = Hd44780::new(MockBus::default(), 0x27, 16, 2).unwrap();
+        driver.bus.decoded.clear();
+        driver.write_line(0, "first").unwrap();
+        driver.write_line(0, "second").unwrap();
+        let commands = driver.bus.take_decoded_commands();
+        assert!(
+            !commands.iter().any(|&cmd| cmd == LCD_CLR),
+            "steady-state writes must not issue LCD_CLR"
+        );
+    }
+
+    #[test]
+    fn blink_cursor_command_emitted() {
+        let mut driver = Hd44780::new(MockBus::default(), 0x27, 16, 2).unwrap();
+        driver.bus.decoded.clear();
+        driver.blink_cursor_on().unwrap();
+        let commands = driver.bus.take_decoded_commands();
+        let expected = LCD_ON_CTRL | LCD_ON_DISPLAY | LCD_ON_CURSOR | LCD_ON_BLINK;
+        assert!(
+            commands.iter().any(|&cmd| cmd == expected),
+            "blink command missing from decoded stream"
+        );
+    }
+
+    #[test]
+    fn custom_char_restores_cursor_position() {
+        let mut driver = Hd44780::new(MockBus::default(), 0x27, 16, 2).unwrap();
+        driver.move_to(3, 1).unwrap();
+        let pattern = [0u8; 8];
+        driver.custom_char(2, &pattern).unwrap();
+        assert_eq!(driver.cursor_x, 3);
+        assert_eq!(driver.cursor_y, 1);
     }
 }

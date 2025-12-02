@@ -12,6 +12,7 @@ pub fn load_or_default() -> Result<Config> {
     if !path.exists() {
         let cfg = Config::default();
         cfg.save_to_path(&path)?;
+        super::validate(&cfg)?;
         return Ok(cfg);
     }
     load_from_path(&path)
@@ -19,7 +20,9 @@ pub fn load_or_default() -> Result<Config> {
 
 pub fn load_from_path(path: &Path) -> Result<Config> {
     if !path.exists() {
-        return Ok(Config::default());
+        let cfg = Config::default();
+        super::validate(&cfg)?;
+        return Ok(cfg);
     }
 
     let raw = fs::read_to_string(path)?;
@@ -142,6 +145,7 @@ pub fn parse(raw: &str) -> Result<Config> {
         }
     }
 
+    super::validate(&cfg)?;
     Ok(cfg)
 }
 
@@ -263,5 +267,41 @@ mod tests {
         assert!(contents.contains("baud ="));
 
         let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn rejects_cols_outside_range() {
+        let path = temp_path("cols_out_of_range");
+        fs::write(&path, "cols = 99").unwrap();
+        let err = load_from_path(&path).unwrap_err();
+        assert!(format!("{err}").contains("cols must"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn rejects_rows_outside_range() {
+        let path = temp_path("rows_out_of_range");
+        fs::write(&path, "rows = 0").unwrap();
+        let err = load_from_path(&path).unwrap_err();
+        assert!(format!("{err}").contains("rows must"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn rejects_scroll_speed_below_min() {
+        let path = temp_path("scroll_speed_invalid");
+        fs::write(&path, "scroll_speed_ms = 10").unwrap();
+        let err = load_from_path(&path).unwrap_err();
+        assert!(format!("{err}").contains("scroll_speed_ms"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn rejects_page_timeout_below_min() {
+        let path = temp_path("page_timeout_invalid");
+        fs::write(&path, "page_timeout_ms = 10").unwrap();
+        let err = load_from_path(&path).unwrap_err();
+        assert!(format!("{err}").contains("page_timeout_ms"));
+        let _ = fs::remove_file(path);
     }
 }

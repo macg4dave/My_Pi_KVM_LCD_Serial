@@ -1,4 +1,4 @@
-use crate::Result;
+use crate::{Error, Result};
 use std::path::Path;
 
 pub mod loader;
@@ -7,8 +7,14 @@ pub const DEFAULT_DEVICE: &str = "/dev/ttyUSB0";
 pub const DEFAULT_BAUD: u32 = 9_600;
 pub const DEFAULT_COLS: u8 = 20;
 pub const DEFAULT_ROWS: u8 = 4;
+pub const MIN_COLS: u8 = 8;
+pub const MAX_COLS: u8 = 40;
+pub const MIN_ROWS: u8 = 1;
+pub const MAX_ROWS: u8 = 4;
 pub const DEFAULT_SCROLL_MS: u64 = 250;
 pub const DEFAULT_PAGE_TIMEOUT_MS: u64 = 4000;
+pub const MIN_SCROLL_MS: u64 = 100;
+pub const MIN_PAGE_TIMEOUT_MS: u64 = 500;
 pub const DEFAULT_PCF8574_ADDR: Pcf8574Addr = Pcf8574Addr::Auto;
 pub const DEFAULT_BACKOFF_INITIAL_MS: u64 = 500;
 pub const DEFAULT_BACKOFF_MAX_MS: u64 = 10_000;
@@ -93,6 +99,30 @@ fn parse_pcf_addr(raw: &str) -> std::result::Result<Pcf8574Addr, String> {
         .or_else(|_| raw.parse::<u8>())
         .map_err(|_| "expected 'auto' or a hex/decimal address (e.g., 0x27)".to_string())?;
     Ok(Pcf8574Addr::Addr(value))
+}
+
+pub(crate) fn validate(cfg: &Config) -> Result<()> {
+    if cfg.cols < MIN_COLS || cfg.cols > MAX_COLS {
+        return Err(Error::InvalidArgs(format!(
+            "cols must be between {MIN_COLS} and {MAX_COLS}"
+        )));
+    }
+    if cfg.rows < MIN_ROWS || cfg.rows > MAX_ROWS {
+        return Err(Error::InvalidArgs(format!(
+            "rows must be between {MIN_ROWS} and {MAX_ROWS}"
+        )));
+    }
+    if cfg.scroll_speed_ms < MIN_SCROLL_MS {
+        return Err(Error::InvalidArgs(format!(
+            "scroll_speed_ms must be at least {MIN_SCROLL_MS}"
+        )));
+    }
+    if cfg.page_timeout_ms < MIN_PAGE_TIMEOUT_MS {
+        return Err(Error::InvalidArgs(format!(
+            "page_timeout_ms must be at least {MIN_PAGE_TIMEOUT_MS}"
+        )));
+    }
+    Ok(())
 }
 
 fn format_pcf_addr(addr: &Pcf8574Addr) -> String {
