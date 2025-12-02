@@ -11,8 +11,8 @@ Ship a single, ultra-light Rust daemon for Raspberry Pi 1 (ARMv6) that reads ne
 4. Always annotate changes with the roadmap item they advance (e.g., “P3: Config loader hardening”) so we can trace progress.
 
 ## Core behavior (never change without approval)
-- **IO**: UART input via `/dev/ttyUSB0` (9600 8N1) by default; config/CLI overrides may point to `/dev/ttyAMA0`, `/dev/ttyS*`, or USB adapters as long as they speak the same framing. LCD output via HD44780 + PCF8574 @ 0x27. No Wi-Fi, Bluetooth, sockets, HTTP, USB HID, or other transports.
-- **CLI**: binary is now invoked as `lifelinetty` and keeps the old `seriallcd` name as a compatibility alias. Supported flags: `--run`, `--test-lcd`, `--test-serial`, `--device`, `--baud`, `--cols`, `--rows`, `--demo`. Do **not** add flags or modes unless the roadmap explicitly calls for it (e.g., future `--serialsh`).
+- **IO**: UART input via `/dev/ttyUSB0` (9600 8N1) by default; config/CLI overrides may point to `/dev/ttyAMA0`, `/dev/ttyS*`, or USB adapters as long as they speak the same framing. LCD output via HD44780 + PCF8574 @ 0x27. No Wi-Fi, Bluetooth, sockets, HTTP, USB HID, or other transports.
+- **CLI**: binary is invoked as `lifelinetty`. Supported flags: `--run`, `--test-lcd`, `--test-serial`, `--device`, `--baud`, `--cols`, `--rows`, `--demo`. Do **not** add flags or modes unless the roadmap explicitly calls for it (e.g., future `--serialsh`).
 - **Protocols**: newline-terminated JSON or `key=value` pairs; LCD output is always two 16-character lines. Exit code 0 on success, non-zero on fatal errors.
 
 ## Storage + RAM-disk policy (mandatory)
@@ -29,10 +29,10 @@ Ship a single, ultra-light Rust daemon for Raspberry Pi 1 (ARMv6) that reads ne
 - **Build/test commands**: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test`, `cargo build --release` when needed. All must pass on x86_64 **and** ARMv6.
 
 ## Interfaces that must stay stable
-- CLI name + flags (see above) until roadmap explicitly authorizes changeover to `lifelinetty` binary.
+- CLI name + flags: `lifelinetty` binary with documented flags.
 - Config schema at `~/.serial_lcd/config.toml` and payload contracts in `src/payload/`.
-- LCD command set (HD44780) and I²C wiring (PCF8574 @ 0x27).
-- Serial framing: newline JSON / key=value. Keep compatibility layers for legacy SerialLCD senders (see roadmap item P19).
+- LCD command set (HD44780) and I²C wiring (PCF8574 @ 0x27).
+- Serial framing: newline JSON / key=value.
 
 ## Quality bar & testing
 - Every behavioral change gets matching tests (unit + integration under `tests/`). All CLI flags must have regression coverage.
@@ -65,7 +65,7 @@ Details:
 
 ## Development + review environment
 - Target hardware: Raspberry Pi 1 Model A (ARMv6, Debian/systemd). Cross-compile or use QEMU/docker images in `docker/` and `scripts/local-release.sh` for packaging.
-- Services: `lifelinetty.service` / `seriallcd.service` must remain systemd-friendly (no extra daemons). When editing, ensure release artifacts (`packaging/`, Dockerfiles) stay consistent with the rename plan (B6).
+- Services: `lifelinetty.service` must remain systemd-friendly (no extra daemons). Legacy `seriallcd.service` units have been retired, so ensure release artifacts (`packaging/`, Dockerfiles) stay consistent with the rename plan (B6).
 
 ## Documentation expectations
 - Keep README, `docs/architecture.md`, `docs/roadmap.md`, `docs/lcd_patterns.md`, and `samples/` payloads synchronized with functionality.

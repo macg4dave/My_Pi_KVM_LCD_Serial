@@ -1,9 +1,9 @@
 Context
 -------
--- Project: <project_name> — a Rust application or library.
--- Main code: <src_directory> (crate name `<crate_name>`).
--- Tests: `cargo test -p <crate_name>` (unit + integration under `<tests_directory>`).
--- Tooling: `cargo build`, `cargo test`, `cargo run`, `rustfmt`, `clippy`.
+- **Project**: LifelineTTY — single-binary Rust daemon for Raspberry Pi 1 that ingests newline-delimited JSON via `/dev/ttyUSB0 @ 9600 8N1` by default; config/CLI overrides may target `/dev/ttyAMA0`, `/dev/ttyS*`, or USB adapters without changing framing.
+- **Main code**: `src/**` in the `lifelinetty` crate; integration tests live under `tests/`.
+- **Tests/tooling**: `cargo fmt`, `cargo clippy -- -D warnings`, and `cargo test` (plus targeted suites) must stay green on x86_64 and ARMv6.
+- **Storage guardrails**: only `~/.serial_lcd/config.toml` persists; logs, payload caches, and temp files belong under `/run/serial_lcd_cache`.
 
 Hard constraints (always include)
 --------------------------------

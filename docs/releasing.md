@@ -93,18 +93,23 @@ left to the operator so you can adjust config and wiring first.
 
 ## Migration notes: SerialLCD -> LifelineTTY
 
-If you're upgrading from the previous SerialLCD releases, here's what changed and how to migrate smoothly:
+SerialLCD was an alpha preview and is no longer supported. No backward compatibility is maintained.
 
-- Binary rename: the runtime binary and packaged artifacts are now called `lifelinetty`. Packaging will create a compatibility copy at `/usr/bin/seriallcd` for backwards compatibility, but it's recommended to update scripts to call `lifelinetty` directly.
-- Systemd unit: the primary unit file is `lifelinetty.service`. To ease transition, installer scripts will create a compatibility symlink called `seriallcd.service` that points to `lifelinetty.service`. You can safely enable either service, but use `lifelinetty.service` going forward.
-- Config path: no changes — the configuration file remains at `~/.serial_lcd/config.toml` to avoid surprises. Existing config will be used by the new binary.
-- CLI & env var compatibility: CLI flags are unchanged; environment variables for logging now prefer `LIFELINETTY_LOG_*`, but the legacy `SERIALLCD_LOG_*` variables continue to be accepted for compatibility.
-- Release artifacts: the `releases/` artifacts use `lifelinetty_v<version>_<arch>` names. Old `seriallcd_*` artifacts may exist in historical releases.
+If you were using SerialLCD, upgrade to LifelineTTY:
 
-Suggested steps after installing the new package:
+- **Binary**: download the latest `lifelinetty_v*_<arch>` release binary from the GitHub releases page.
+- **Systemd unit**: enable `lifelinetty.service` (the previous `seriallcd.service` is not provided).
+- **Config path**: configuration remains at `~/.serial_lcd/config.toml`; your existing configs are compatible with the new binary.
+- **CLI & env vars**: update any scripts that call `seriallcd` to use `lifelinetty`. Use `LIFELINETTY_LOG_*` environment variables for logging.
+- **Release artifacts**: all new artifacts use the `lifelinetty_v<version>_<arch>` naming scheme.
+- **Compatibility note**: installer scripts no longer create `/usr/bin/seriallcd` or `seriallcd.service` symlinks—remove any manual leftovers when upgrading.
 
-1. Verify the new unit and binary exist: `which lifelinetty` and `systemctl status lifelinetty.service`.
-2. If you have scripts, crons, or tooling that call `seriallcd`, either update them to `lifelinetty` or keep the compatibility symlink until you can migrate.
-3. If you previously enabled `seriallcd.service`, check whether the compatibility symlink was created; otherwise `systemctl enable --now lifelinetty.service`.
+Steps to migrate:
 
-If you run into issues, see `docs/architecture.md` and the logs (`LIFELINETTY_LOG_PATH` or `SERIALLCD_LOG_PATH`) for troubleshooting.
+1. Stop the old service: `sudo systemctl stop seriallcd.service` (if running).
+2. Install LifelineTTY: `sudo apt install ./lifelinetty_*.deb` or equivalent for your platform.
+3. Update any scripts or crons that invoke `seriallcd` to use `lifelinetty`.
+4. Enable and start the new service: `sudo systemctl enable --now lifelinetty.service`.
+5. Verify: `which lifelinetty` and `systemctl status lifelinetty.service`.
+
+For troubleshooting, see `docs/architecture.md` and logs via `LIFELINETTY_LOG_PATH`.

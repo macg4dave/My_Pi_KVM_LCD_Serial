@@ -1,8 +1,15 @@
 ---
-##Copy the template, fill in the Task and Details sections, then execute in VS Code or Copilot.
 name: rust_ui_task
 description: "Prompt template for UI, rendering, widget, and input-handling changes in a Rust app."
----------------------------------------------------------------------------------------------------
+---
+
+## Copy the template, fill in the Task and Details sections, then execute in VS Code or Copilot.
+
+## Context
+
+- **Project**: LifelineTTY — an ultra-light Rust daemon that renders HD44780 LCD lines from newline-delimited JSON received on `/dev/ttyUSB0 @ 9600 8N1` by default; CLI/config overrides can target `/dev/ttyAMA0`, `/dev/ttyS*`, or USB adapters but must keep the same framing.
+- **Storage**: only `~/.serial_lcd/config.toml` persists; all UI caches/logs/overlays must stay within `/run/serial_lcd_cache`.
+- **LCD guardrails**: HD44780 + PCF8574 backpack, two 16-character lines today—UI changes must respect those dimensions unless the roadmap explicitly expands them.
 
 ## Scope
 

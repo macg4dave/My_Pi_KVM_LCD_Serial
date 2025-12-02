@@ -3,6 +3,12 @@ name: rust_refactor
 description: "Prompt template for refactoring tasks in Rust projects."
 ---
 
+Context
+-------
+- **Project**: LifelineTTY — ultra-light Rust daemon driving HD44780 LCDs from newline JSON received over `/dev/ttyUSB0 @ 9600 8N1` by default; overrides may target `/dev/ttyAMA0`, `/dev/ttyS*`, or USB adapters with identical framing.
+- **Storage guardrails**: only `~/.serial_lcd/config.toml` persists; temp files, logs, and caches live strictly under `/run/serial_lcd_cache`.
+- **Constraints**: Keep CLI flags stable (`--run`, `--test-lcd`, `--test-serial`, `--device`, `--baud`, `--cols`, `--rows`, `--demo`).
+
 Scope
 -----
 -- Typical files: `<src/*>` modules, helpers, and internal structures (crate: `<crate_name>`).

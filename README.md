@@ -40,7 +40,7 @@ Everything is designed so that **any Pi beginner** can get results in minutes, w
 
 ---
 
-# Quick Start (Raspberry Pi)
+## Quick Start (Raspberry Pi)
 
 These steps get you running fast.
 
@@ -115,7 +115,7 @@ If you see animations, your wiring is perfect.
 
 ---
 
-# Sending JSON (This is the real magic)
+## Sending JSON (This is the real magic)
 
 LifelineTTY listens for **one JSON object per line** over a serial port.
 
@@ -155,7 +155,7 @@ Examples:
 
 ---
 
-# Sending the JSON (TODO — Sister Program Coming)
+## Sending the JSON (TODO — Sister Program Coming)
 
 Soon there will be a small companion tool that:
 
@@ -168,7 +168,7 @@ Soon there will be a small companion tool that:
 
 ---
 
-# Config File (Auto-generated)
+## Config File (Auto-generated)
 
 Stored at:
 
@@ -199,7 +199,35 @@ Reload config without restarting the daemon:
 
 ---
 
-# Systemd (Optional but recommended)
+## Storage & cache policy
+
+- Persistent settings live at `~/.serial_lcd/config.toml` (auto-created the first time you run the daemon).
+- Everything else (logs, payload caches, telemetry snapshots, LCD caches) belongs in the RAM disk mounted at `/run/serial_lcd_cache`. The provided systemd unit already restricts writes to that directory.
+- The `--log-file` flag and `LIFELINETTY_LOG_PATH` environment variable only accept paths inside `/run/serial_lcd_cache`. Provide an absolute cache path or a relative name (e.g., `logs/runtime.log`) and the daemon will place it under the cache root.
+- `/run/serial_lcd_cache` is wiped on reboot—treat it as ephemeral scratch space.
+
+## CLI reference
+
+`lifelinetty run` is the default command, so you can omit `run` and pass flags directly. Every flag below also works from `~/.serial_lcd/config.toml` unless noted.
+
+| Flag | Purpose | Default / Notes |
+| ---- | ------- | ---------------- |
+| `--device <path>` | Serial device to read newline-delimited JSON from. | `/dev/ttyUSB0` @ 9600 8N1. Override to `/dev/ttyAMA0`, `/dev/ttyS*`, or USB adapters as needed. |
+| `--baud <number>` | Serial baud rate. | `9600` |
+| `--cols <number>` | LCD columns. | `20` |
+| `--rows <number>` | LCD rows. | `4` |
+| `--payload-file <path>` | Load a local JSON payload and render it once (no serial input). | Disabled by default—handy for CI smoke tests. |
+| `--backoff-initial-ms <number>` | Initial reconnect backoff after serial failures. | `500` ms |
+| `--backoff-max-ms <number>` | Maximum reconnect backoff. | `10_000` ms |
+| `--pcf8574-addr <auto\|0xNN>` | I²C address for the PCF8574 backpack or `auto` to probe the common range. | `auto` (tries `0x27`, `0x26`, … ). |
+| `--log-level <error\|warn\|info\|debug\|trace>` | Verbosity for stderr/file logs. | `info` (also configurable via `LIFELINETTY_LOG_LEVEL`). |
+| `--log-file <path>` | Append logs to a file inside `/run/serial_lcd_cache` (also honors `LIFELINETTY_LOG_PATH`). | No file logging unless you provide a cache-rooted path. |
+| `--demo` | Run built-in demo pages to validate wiring—no serial input required. | Disabled by default. |
+| `--help` / `--version` | Display usage or the crate version. | Utility flags that never touch hardware. |
+
+---
+
+## Systemd (Optional but recommended)
 
 Install as a service:
 
@@ -218,7 +246,7 @@ Gives you:
 
 ---
 
-# Troubleshooting & Debugging
+## Troubleshooting & Debugging
 
 ### LCD is blank  
 
@@ -264,7 +292,7 @@ Try:
 
 ---
 
-# Developer / Advanced Info
+## Developer / Advanced Info
 
 ### Build from source
 
@@ -298,7 +326,7 @@ See `docs/releasing.md` for `.deb`, `.rpm`, and multi‑arch builds.
 
 ---
 
-# Summary
+## Summary
 
 LifelineTTY gives you a **professional-quality LCD dashboard** with:
 
@@ -317,15 +345,15 @@ Enjoy the project — and watch for the companion **lifelinetty‑send** tool co
 
 ---
 
-## Legacy name: SerialLCD
+## About SerialLCD (Alpha)
 
-This project was originally called **SerialLCD**. The last release under that name is tagged as `seriallcd-v1.0.0`. Behaviour remains compatible; only the binary and project branding have changed.
+**LifelineTTY is the production release.** SerialLCD was an alpha preview and is no longer supported. No backward compatibility is maintained.
 
-Migration notes:
+If you were using SerialLCD, migrate your setup to LifelineTTY:
 
-- The binary is now `lifelinetty` and packaged releases provide a compatibility copy at `/usr/bin/seriallcd` to keep legacy scripts working.
-- The primary systemd unit is `lifelinetty.service`. Installer scripts will create a `seriallcd.service` symlink for compatibility — it's recommended to enable `lifelinetty.service` going forward.
-- `~/.serial_lcd/config.toml` remains the configuration file path and is unchanged.
-- CLI behavior and flags are compatible with previous releases; for logging, `LIFELINETTY_LOG_*` env variables are preferred, but `SERIALLCD_LOG_*` is still accepted.
+- Download and install the latest LifelineTTY release from the GitHub releases page.
+- Update your scripts and configs to use `lifelinetty` instead of `seriallcd`.
+- Configuration file path remains `~/.serial_lcd/config.toml`; all existing configs are compatible.
+- JSON payload format is unchanged — your sender scripts will work as-is.
 
-If you maintain scripts or deployments that assume `seriallcd`, update them to `lifelinetty` (or keep `seriallcd` as the alias until you can migrate).
+For details on what's new in LifelineTTY, see the roadmap and architecture docs.

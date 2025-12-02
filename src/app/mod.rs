@@ -69,15 +69,15 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(config: AppConfig) -> Self {
-        let logger = Logger::new(config.log_level, config.log_file.clone());
-        Self { config, logger }
+    pub fn new(config: AppConfig) -> Result<Self> {
+        let logger = Logger::new(config.log_level, config.log_file.clone())?;
+        Ok(Self { config, logger })
     }
 
     pub fn from_options(opts: RunOptions) -> Result<Self> {
         let cfg_file = Config::load_or_default()?;
         let merged = AppConfig::from_sources(cfg_file, opts);
-        Ok(Self::new(merged))
+        Self::new(merged)
     }
 
     /// Entry point for the daemon. Wire up serial + LCD here.

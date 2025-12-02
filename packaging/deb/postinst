@@ -4,12 +4,7 @@ set -e
 # Refresh systemd unit cache after install/upgrade.
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload >/dev/null 2>&1 || true
-    # Create a legacy compatibility symlink so old `seriallcd.service` names still work
-    if [ ! -e "/lib/systemd/system/seriallcd.service" ]; then
-        ln -sf /lib/systemd/system/lifelinetty.service /lib/systemd/system/seriallcd.service || true
-    fi
-    systemctl daemon-reload >/dev/null 2>&1 || true
-    echo "lifelinetty installed. Enable with: systemctl enable --now lifelinetty.service (or seriallcd.service for legacy callers)"
+    echo "lifelinetty installed. Enable with: systemctl enable --now lifelinetty.service"
 fi
 
 exit 0

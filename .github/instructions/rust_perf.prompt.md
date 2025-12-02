@@ -3,6 +3,12 @@ name: rust_perf
 description: "Prompt template for performance profiling and optimization tasks in Rust projects."
 ---
 
+Context
+-------
+- **Project**: LifelineTTY — HD44780 LCD daemon consuming newline-delimited JSON via `/dev/ttyUSB0 @ 9600 8N1` by default; overrides may point at `/dev/ttyAMA0`, `/dev/ttyS*`, or USB adapters without changing framing.
+- **Storage guardrails**: only `~/.serial_lcd/config.toml` persists; all logs, caches, and telemetry must stay inside `/run/serial_lcd_cache`.
+- **Performance goals**: keep RSS under 5 MB and avoid busy loops while obeying UART/LCD timing requirements.
+
 Scope
 -----
 -- Typical files: `<src/*>` modules, hot paths, algorithms, or data structures (crate: `<crate_name>`).

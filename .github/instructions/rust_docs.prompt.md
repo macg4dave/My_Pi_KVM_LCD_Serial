@@ -8,6 +8,7 @@ Context
 - **Primary docs**: `README.md`, `docs/*.md`, `docs/lcd_patterns.md`, `docs/architecture.md`, `docs/releasing.md`, service unit notes, and Rustdoc comments inside `src/**`.
 - **Audience**: Raspberry Pi operators configuring `lifelinetty`, plus contributors maintaining UART/LCD render pipeline.
 - **Doc requirements**: every CLI flag and config key must be documented; storage guardrails (`/run/serial_lcd_cache`, `~/.serial_lcd/config.toml`) and LCD constraints must be reiterated when relevant.
+- **Serial defaults**: `/dev/ttyUSB0 @ 9600 8N1` baseline with config/CLI overrides allowed for `/dev/ttyAMA0`, `/dev/ttyS*`, and USB adapters—ensure every doc matches this statement.
 - **Tooling**: run `cargo fmt`, `cargo clippy -- -D warnings`, and `cargo test` to ensure doctests/examples compile.
 
 Hard constraints

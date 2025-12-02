@@ -8,6 +8,7 @@ Scope
 - Typical files: `.github/workflows/*.yml`, `Makefile`, `scripts/local-release.sh`, Dockerfiles under `docker/`, and packaging metadata.
 - Applies to build/test automation, linting, cross-compilation (armv6/armv7/arm64), and release verification for the `lifelinetty` crate.
 - CI must run `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test`, and (when requested) packaging tasks while honoring the RAM-disk + systemd constraints described in `.github/copilot-instructions.md`.
+- Serial baseline: `/dev/ttyUSB0 @ 9600 8N1` with config/CLI overrides for `/dev/ttyAMA0`, `/dev/ttyS*`, and USB adapters; keep docs and workflows consistent with these defaults.
 
 Hard constraints
 ----------------

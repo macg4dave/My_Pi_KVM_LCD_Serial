@@ -3,6 +3,12 @@ name: rust_security
 description: "Prompt template for security reviews and hardening tasks in Rust projects."
 ---
 
+Context
+-------
+- **Project**: LifelineTTY — single Rust daemon consuming newline JSON over `/dev/ttyUSB0 @ 9600 8N1` by default, with config/CLI overrides for `/dev/ttyAMA0`, `/dev/ttyS*`, and USB adapters.
+- **Storage policy**: persist only `~/.serial_lcd/config.toml`; all other writes (logs, payload caches, telemetry) must live inside `/run/serial_lcd_cache`.
+- **Attack surface**: UART payload parsing, LCD rendering, and CLI/config inputs—security changes must preserve the fixed protocol/LCD contracts while keeping RSS < 5 MB.
+
 Scope
 -----
 -- Typical files: `<src/*>` modules, error handling, input parsing, unsafe code blocks (crate: `<crate_name>`).

@@ -70,7 +70,7 @@ impl Command {
             "  --backoff-max-ms <number>      Maximum reconnect backoff (default: 10000)\n",
             "  --pcf8574-addr <auto|0xNN>     PCF8574 I2C address or 'auto' to probe (default: auto)\n",
             "  --log-level <error|warn|info|debug|trace>  Log verbosity (default: info)\n",
-            "  --log-file <path>              Append logs to a file (also honors LIFELINETTY_LOG_PATH; SERIALLCD_LOG_PATH is accepted for compatibility)\n",
+            "  --log-file <path>              Append logs inside /run/serial_lcd_cache (also honors LIFELINETTY_LOG_PATH)\n",
             "  --demo                         Run built-in demo pages on the LCD (no serial input)\n",
             "  -h, --help        Show this help\n",
             "  -V, --version     Show version\n",

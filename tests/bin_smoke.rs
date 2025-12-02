@@ -1,9 +1,16 @@
+use lifelinetty::{
+    app::App,
+    cli::{Command, RunOptions},
+    payload::{Defaults as PayloadDefaults, RenderFrame},
+};
 use std::{
     env, fs,
     path::{Path, PathBuf},
-    process::Command,
+    sync::{Mutex, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
+
+static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn temp_home() -> PathBuf {
     let mut dir = env::temp_dir();
@@ -15,63 +22,90 @@ fn temp_home() -> PathBuf {
     dir
 }
 
-fn run_with_home(args: &[&str]) -> std::process::Output {
+fn with_temp_home<F: FnOnce()>(f: F) {
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let original_home = env::var_os("HOME");
     let home = temp_home();
     fs::create_dir_all(&home).expect("failed to create temp HOME");
-    let bin = env::var("CARGO_BIN_EXE_lifelinetty").expect("CARGO_BIN_EXE_lifelinetty not set");
-    let output = Command::new(bin)
-        .args(args)
-        .env("HOME", &home)
-        .output()
-        .expect("failed to run lifelinetty");
-    let _ = fs::remove_dir_all(&home);
-    output
+    env::set_var("HOME", &home);
+    f();
+    if let Some(val) = original_home {
+        env::set_var("HOME", val);
+    } else {
+        env::remove_var("HOME");
+    }
+    let _ = fs::remove_dir_all(home);
 }
 
-// B4: CLI docs/tests parity - these tests require proper Cargo integration
-// They are part of the blocker B4 work
+// B3/B4: CLI + storage guardrails (library-level to avoid hardware dependency)
 
 #[test]
-#[ignore]
+fn rejects_log_file_outside_cache() {
+    with_temp_home(|| {
+        let mut opts = RunOptions::default();
+        opts.log_file = Some("/tmp/out.log".into());
+        let err = App::from_options(opts)
+            .err()
+            .expect("expected invalid log path to be rejected");
+        assert!(
+            format!("{err}").contains("/run/serial_lcd_cache"),
+            "error did not mention cache dir: {err}"
+        );
+    });
+}
+
+#[test]
+fn rejects_env_log_path_outside_cache() {
+    with_temp_home(|| {
+        let original = env::var_os("LIFELINETTY_LOG_PATH");
+        env::set_var("LIFELINETTY_LOG_PATH", "/tmp/env.log");
+        let err = App::from_options(RunOptions::default())
+            .err()
+            .expect("expected env log path to be rejected");
+        if let Some(val) = original {
+            env::set_var("LIFELINETTY_LOG_PATH", val);
+        } else {
+            env::remove_var("LIFELINETTY_LOG_PATH");
+        }
+        assert!(
+            format!("{err}").contains("/run/serial_lcd_cache"),
+            "error did not mention cache dir: {err}"
+        );
+    });
+}
+
+#[test]
 fn prints_version() {
-    let output = run_with_home(&["--version"]);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        output.status.success(),
-        "lifelinetty --version failed: status {:?}, stderr: {}",
-        output.status,
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        stdout.trim().starts_with(env!("CARGO_PKG_VERSION")),
-        "unexpected version output: {stdout}"
-    );
+    let args = vec!["--version".to_string()];
+    let cmd = Command::parse(&args).unwrap();
+    assert!(matches!(cmd, Command::ShowVersion));
+    assert!(!env!("CARGO_PKG_VERSION").is_empty());
 }
 
 #[test]
-#[ignore]
-fn payload_smoke_exits_cleanly() {
+fn help_lists_core_flags() {
+    let help = Command::help();
+    for flag in ["--device", "--cols", "--rows", "--demo"] {
+        assert!(
+            help.contains(flag),
+            "help output missing flag {flag}: {help}"
+        );
+    }
+}
+
+#[test]
+fn payload_sample_parses() {
     let payload = Path::new(env!("CARGO_MANIFEST_DIR")).join("samples/test_payload.json");
     assert!(
         payload.exists(),
         "expected sample payload at {}",
         payload.display()
     );
-
-    let output = run_with_home(&[
-        "--payload-file",
-        payload.to_str().expect("payload path not valid utf-8"),
-        "--rows",
-        "2",
-        "--cols",
-        "16",
-    ]);
-
-    assert!(
-        output.status.success(),
-        "lifelinetty payload smoke failed: status {:?}, stdout: {}, stderr: {}",
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let raw = fs::read_to_string(&payload).expect("failed to read sample payload");
+    let defaults = PayloadDefaults {
+        scroll_speed_ms: lifelinetty::config::DEFAULT_SCROLL_MS,
+        page_timeout_ms: lifelinetty::config::DEFAULT_PAGE_TIMEOUT_MS,
+    };
+    RenderFrame::from_payload_json_with_defaults(&raw, defaults)
+        .expect("sample payload failed to parse");
 }

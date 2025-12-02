@@ -4,9 +4,6 @@ set -e
 # Refresh systemd unit cache after removal/purge.
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload >/dev/null 2>&1 || true
-    if [ -e "/lib/systemd/system/seriallcd.service" ]; then
-        rm -f "/lib/systemd/system/seriallcd.service" || true
-    fi
 fi
 
 exit 0

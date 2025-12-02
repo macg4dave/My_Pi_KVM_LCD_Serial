@@ -5,9 +5,9 @@ description: "Prompt template for preparing a Rust crate or workspace release."
 
 Context
 -------
--- Project: <project_name> (crate `<crate_name>` or workspace).
--- Source: <src_directory>. Tests: <tests_directory>.
--- Tooling: `cargo build`, `cargo test`, `cargo fmt`, `cargo clippy`, `cargo publish --dry-run`.
+- **Project**: LifelineTTY — single `lifelinetty` crate powering a Raspberry Pi 1 daemon that reads newline-delimited JSON over `/dev/ttyUSB0 @ 9600 8N1`; CLI/config overrides may target `/dev/ttyAMA0`, `/dev/ttyS*`, or USB adapters.
+- **Source/tests**: code under `src/**`, integration suites under `tests/`; releases rely on `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test`, and packaging scripts/Dockerfiles.
+- **Tooling**: `scripts/local-release.sh`, Docker cross-builders, and packaging metadata (`packaging/`, `lifelinetty.service`) must stay aligned with the rename + storage charter (`/run/serial_lcd_cache`, `~/.serial_lcd/config.toml`).
 
 Hard constraints
 ----------------

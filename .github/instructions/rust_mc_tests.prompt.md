@@ -3,6 +3,12 @@ name: rust_tests
 description: "Prompt template for creating or updating tests and fixtures in Rust projects."
 ---
 
+Context
+-------
+- **Project**: LifelineTTY — single Rust daemon for Raspberry Pi 1 (ARMv6) that ingests newline-delimited JSON over `/dev/ttyUSB0 @ 9600 8N1` by default; config/CLI overrides may point at `/dev/ttyAMA0`, `/dev/ttyS*`, or USB adapters without changing framing.
+- **Storage guardrails**: only `~/.serial_lcd/config.toml` is persistent; every other write (logs, payload caches, telemetry) must stay inside `/run/serial_lcd_cache`.
+- **Tests**: prefer fake serial/LCD shims so suites run without hardware, but keep coverage anchored to real CLI behavior when practical.
+
 Scope
 -----
 -- Typical files: `<tests/*>`, unit tests in `<src/*>`, fixtures under `<tests/fixtures>` (crate: `<crate_name>`).

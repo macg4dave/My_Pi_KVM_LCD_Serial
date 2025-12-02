@@ -10,6 +10,8 @@ pub mod serial;
 pub mod serial_async;
 pub mod state;
 
+pub const CACHE_DIR: &str = "/run/serial_lcd_cache";
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]

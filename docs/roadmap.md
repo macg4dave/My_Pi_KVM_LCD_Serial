@@ -13,12 +13,12 @@ LifelineTTY is the successor to SerialLCD: a single Rust daemon for Raspberry Pi
 
 ## Blockers (must fix before new scope)
 
-1. **B1 — Finish rename to LifelineTTY everywhere (Done)**: README, `docs/architecture.md`, `docs/releasing.md`, `lifelinetty.service`, `seriallcd.service`, packaging scripts, Dockerfiles, Makefile, and tests were updated to replace `seriallcd` with `lifelinetty`. Compatibility aliases (`/usr/bin/seriallcd`, `seriallcd.service`) remain in packaging for backwards compatibility. Update further, if needed, via the P1 lint & doc cleanup task.
-2. **B2 — Charter + instructions alignment**: keep `.github/copilot-instructions.md`, README, and prompt files synchronized on the `/dev/ttyUSB0 @ 9600` defaults and the expectation that config overrides can point at `/dev/ttyAMA0`, `/dev/ttyS0`, USB adapters, etc.
-3. **B3 — Config + cache policy audit**: search for any path writes outside `/run/serial_lcd_cache` or `~/.serial_lcd/config.toml`. Add tests in `tests/bin_smoke.rs` to ensure temporary files respect the cache.
-4. **B4 — CLI docs/tests parity**: README and `tests/bin_smoke.rs` must document + test `--demo`, `--cols`, `--rows`, etc. Add missing coverage and doc sections.
-5. **B5 — AI prompt + automation refresh**: `.github/instructions/*.md` and any devtool prompts (e.g., `rust_mc_ui.prompt.md`) must mention the new product name and scope before downstream contributors start feature work.
-6. **B6 — Release tooling sanity pass**: `scripts/local-release.sh`, Dockerfiles, and packaging metadata must emit `lifelinetty_*` artifacts and service units. Without this, installers will remain branded `seriallcd`.
+1. **B1 — Finish rename to LifelineTTY everywhere (✅ 2 Dec 2025)**: README, `docs/architecture.md`, `docs/releasing.md`, `lifelinetty.service`, packaging scripts, Dockerfiles, Makefile, and tests were updated to replace `seriallcd` with `lifelinetty`. SerialLCD was an alpha preview only; backward compatibility is not required. All tooling is now LifelineTTY-branded.
+2. **B2 — Charter + instructions alignment (✅ 2 Dec 2025)**: `.github/copilot-instructions.md`, README, and every prompt under `.github/instructions/` now restate the `/dev/ttyUSB0 @ 9600` defaults and call out acceptable overrides (`/dev/ttyAMA0`, `/dev/ttyS*`, USB adapters).
+3. **B3 — Config + cache policy audit (✅ 2 Dec 2025)**: the daemon rejects log paths outside `/run/serial_lcd_cache`, and `tests/bin_smoke.rs` enforces the cache-only rule so nothing writes outside the RAM disk (other than `~/.serial_lcd/config.toml`).
+4. **B4 — CLI docs/tests parity (✅ 2 Dec 2025)**: README gained a full CLI table plus storage notes, and `tests/bin_smoke.rs` now runs non-ignored smoke tests covering `--version`, `--help`, `--device`, `--cols`, `--rows`, and `--demo` documentation.
+5. **B5 — AI prompt + automation refresh (✅ 2 Dec 2025)**: `.github/instructions/*.md` and devtool prompts now explicitly describe LifelineTTY’s mission, storage guardrails, and serial defaults before downstream contributors start feature work.
+6. **B6 — Release tooling sanity pass (✅ 2 Dec 2025)**: `scripts/local-release.sh`, Dockerfiles, packaging metadata, and docs ship only `lifelinetty_*` binaries/service units; legacy `seriallcd` symlinks and units have been retired.
 
 > _Only after B1–B6 are closed should we land anything from the P1–P20 queue or milestone features below._
 
@@ -43,9 +43,8 @@ LifelineTTY is the successor to SerialLCD: a single Rust daemon for Raspberry Pi
 | **P15** | **Heartbeat + watchdog**: implement mutual heartbeat packets and fail-safe hooks to re-run LCD “offline” screen or trigger local script (within charter: no extra daemons). |
 | **P16** | **CLI tunneling UX polish**: history, prompt, exit codes surfaced nicely in `--test-serial` mode without breaking automation. |
 | **P17** | **Remote file integrity tooling**: CLI helper to verify checksums and list staged chunks in `/run/serial_lcd_cache`. |
-| **P18** | **Config-driven polling profiles**: allow `profiles` table in `config.toml` to customize polling intervals per metric, validated via tests. |
-| **P19** | **Automatic downgrade/compat layer**: ensure older SerialLCD senders can talk to LifelineTTY by sniffing payload capabilities before enabling new features. |
-| **P20** | **Documentation + sample payload refresh**: update `README.md`, `samples/payload_examples*.json`, and `docs/lcd_patterns.md` showing new modes and tunnels. |
+| **P18** | **Config-driven polling profiles**: allow `profiles` table in `config.toml` to customize polling intervals per metric, validated via tests. ||
+| **P19** | **Documentation + sample payload refresh**: update `README.md`, `samples/payload_examples*.json`, and `docs/lcd_patterns.md` showing new modes and tunnels. |
 
 ## Milestones (big features & dependencies)
 
