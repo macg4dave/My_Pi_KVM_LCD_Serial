@@ -1,25 +1,29 @@
-# 📌 Milestone C — Remote file push/pull (framed, chunked, resumable)
+# 📌 Milestone C — Remote file push/pull (framed, chunked, resumable)
 
-*Draft specification for Milestone C of the LifelineTTY project. This file documents design intent only—no code here is executable.*
+
+*Draft specification for Milestone c of the LifelineTTY project. This file documents design intent only—no code here is executable.*
 
 ## Outcome
 
-Provide a reliable UART-based file transfer channel so operators can push logs/configs to the remote host or pull diagnostics back without leaving the serial link. Transfers are chunked, CRC-protected, resumable after drops, and respect the RAM-disk storage mandate. This milestone implements roadmap items **P10 (file transfer transport)** and **P17 (integrity tooling)**, building on milestones A (tunnel) and B (negotiation) and enabling future compression work (Milestone E / P14).
+Enable operators to transfer small files (logs, diagnostics, configs) via UART without leaving the serial link. Transfers are chunked (4–16 KiB per frame), CRC-protected per chunk, resumable after serial reconnects, and respect the RAM-disk storage mandate (`/run/serial_lcd_cache/transfers/`). This milestone implements roadmap items **P10 (file transfer transport)** and **P17 (integrity tooling)**, builds on Milestones A (command tunnel framing) and B (server/client negotiation), and prepares the ground for compression (Milestone F / P14).
 
 ## Success criteria
 
-- Both push and pull flows move files of at least 4 MiB within UART limits while keeping RSS <5 MB.
-- Each chunk carries CRC32 metadata; receivers reject corrupt data and request retransmission without tearing down the whole session.
-- Transfers resume automatically using manifests stored under `/run/serial_lcd_cache/transfers/` when serial links drop mid-file.
-- No process ever writes outside the RAM disk unless a user manually promotes a completed transfer into `~/.serial_lcd/`.
-- CLI tooling documents experimental `--push`/`--pull` flags (gated) and integration tests cover happy-path, resume, and corruption cases.
+- Push and pull flows complete files up to 4 MiB within UART limits while keeping resident memory <5 MB on ARMv6.
+- Each chunk carries CRC32 metadata; receivers reject corrupt data and request retransmission without tearing down the session.
+- Transfers resume automatically using JSON manifests stored under `/run/serial_lcd_cache/transfers/<transfer_id>/` when serial links drop mid-file.
+- No process ever writes outside `/run/serial_lcd_cache/transfers/` except when user manually promotes completed files elsewhere.
+- CLI gate (`--enable-file-transfer` or Cargo feature) controls visibility; integration tests cover happy-path, resume, CRC failure, and boundary cases using mock serial.
 
 ## Dependencies & prerequisites
 
-1. Milestone A provides the framed transport and async multiplex loop.
-2. Milestone B negotiation ensures only the server role accepts inbound pushes to avoid conflicts.
+1. Milestones A and B provide the framed transport layer (`TunnelMsg` in `src/payload/parser.rs`) and async multiplex loop.
+2. Negotiation ensures only the server role accepts inbound pushes (prevents conflicts).
 3. Config loader hardening (P3) validates new `[file_transfer]` options.
-4. Serial backoff telemetry (P5) remains active so transfers respect reconnect timers.
+4. Serial backoff telemetry (P5) remains active; transfers respect reconnect timers.
+5. Existing infrastructure: `tokio` (async runtime), `crc32fast` (checksums), `serde_json` (manifests), `serialport` or `tokio-serial` (transport).
+
+No new crates required; all dependencies already in `Cargo.toml`.
 
 ## Architecture overview
 
@@ -31,29 +35,7 @@ Provide a reliable UART-based file transfer channel so operators can push logs/c
 
 ## Protocol additions
 
-```rust
-pub type ChunkId = u32;
 
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum FileMsg {
-  FileInit { transfer_id: TransferId, path_hint: String, size_bytes: u64,
-         compressed: bool, direction: FileDirection },
-  FileChunk { transfer_id: TransferId, chunk_id: ChunkId, offset: u64,
-         data: Vec<u8>, crc32: u32, is_last: bool },
-  FileAck { transfer_id: TransferId, chunk_id: ChunkId, ok: bool, crc32: u32 },
-  FileComplete { transfer_id: TransferId, success: bool },
-  FileResumeRequest { transfer_id: TransferId },
-  FileResumeStatus { transfer_id: TransferId, next_chunk_id: ChunkId, next_offset: u64 },
-  FileError { transfer_id: TransferId, message: String },
-}
-
-#[derive(Serialize, Deserialize, Copy, Clone)]
-pub enum FileDirection {
-  PushToRemote,
-  PullFromRemote,
-}
-```
 
 - New outer frames reuse Milestone A’s newline JSON + CRC envelope. Additional `FileMsg` CRCs guard per-chunk payloads.
 - Chunk sizes are capped at 4–16 KiB (configurable) to keep buffers small on ARMv6 hardware.
@@ -363,9 +345,6 @@ Receiver behaviour:
    * mark `manifest.completed = true`
    * **do not move** file out of cache here; that’s user’s job.
 
----
-
-*** End Patch
 
 In your CLI layer (whatever you’re using: `clap` or hand-rolled), add **documented but gated** commands:
 
