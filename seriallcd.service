@@ -1,14 +1,14 @@
 [Unit]
-Description=Serial-to-LCD Daemon
+Description=LifelineTTY Serial-to-LCD Daemon (compat with seriallcd)
 After=network.target local-fs.target
 
 [Service]
 Type=simple
-User=seriallcd
-Group=seriallcd
+User=lifelinetty
+Group=lifelinetty
 
 # Where your binary lives (example)
-ExecStart=/usr/local/bin/seriallcd --run
+ExecStart=/usr/local/bin/lifelinetty --run
 
 # Give the service its own private RAM filesystem
 TemporaryFileSystem=/run/serial_lcd_cache:size=100M,mode=0755

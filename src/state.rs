@@ -40,7 +40,7 @@ impl RenderState {
     /// Ingest a JSON frame string. Returns Some(frame) if it is new, None if duplicate.
     pub fn ingest(&mut self, raw: &str) -> Result<Option<RenderFrame>> {
         self.prune_expired(Instant::now());
-        if raw.as_bytes().len() > MAX_FRAME_BYTES {
+        if raw.len() > MAX_FRAME_BYTES {
             return Err(Error::Parse(format!(
                 "frame exceeds {MAX_FRAME_BYTES} bytes"
             )));
@@ -80,6 +80,11 @@ impl RenderState {
     pub fn len(&mut self) -> usize {
         self.prune_expired(Instant::now());
         self.pages.len()
+    }
+
+    pub fn is_empty(&mut self) -> bool {
+        self.prune_expired(Instant::now());
+        self.pages.is_empty()
     }
 
     pub fn set_defaults(&mut self, defaults: Defaults) {

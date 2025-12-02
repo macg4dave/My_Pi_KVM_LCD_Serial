@@ -53,12 +53,12 @@ impl Command {
 
     pub fn help() -> &'static str {
         concat!(
-            "seriallcd - Serial-to-LCD daemon\n",
+            "lifelinetty - Serial-to-LCD daemon\n",
             "\n",
             "USAGE:\n",
-            "  seriallcd run [--device <path>] [--baud <number>] [--cols <number>] [--rows <number>] [--payload-file <path>]\n",
-            "  seriallcd --help\n",
-            "  seriallcd --version\n",
+            "  lifelinetty run [--device <path>] [--baud <number>] [--cols <number>] [--rows <number>] [--payload-file <path>]\n",
+            "  lifelinetty --help\n",
+            "  lifelinetty --version\n",
             "\n",
             "OPTIONS:\n",
             "  --device <path>   Serial device path (default: /dev/ttyUSB0)\n",
@@ -70,7 +70,7 @@ impl Command {
             "  --backoff-max-ms <number>      Maximum reconnect backoff (default: 10000)\n",
             "  --pcf8574-addr <auto|0xNN>     PCF8574 I2C address or 'auto' to probe (default: auto)\n",
             "  --log-level <error|warn|info|debug|trace>  Log verbosity (default: info)\n",
-            "  --log-file <path>              Append logs to a file (also honors SERIALLCD_LOG_PATH)\n",
+            "  --log-file <path>              Append logs to a file (also honors LIFELINETTY_LOG_PATH; SERIALLCD_LOG_PATH is accepted for compatibility)\n",
             "  --demo                         Run built-in demo pages on the LCD (no serial input)\n",
             "  -h, --help        Show this help\n",
             "  -V, --version     Show version\n",
@@ -191,7 +191,7 @@ mod tests {
             "--log-level".into(),
             "debug".into(),
             "--log-file".into(),
-            "/tmp/seriallcd.log".into(),
+            "/tmp/lifelinetty.log".into(),
             "--demo".into(),
         ];
         let expected = RunOptions {
@@ -204,7 +204,7 @@ mod tests {
             backoff_max_ms: Some(9000),
             pcf8574_addr: Some(Pcf8574Addr::Addr(0x23)),
             log_level: Some("debug".into()),
-            log_file: Some("/tmp/seriallcd.log".into()),
+            log_file: Some("/tmp/lifelinetty.log".into()),
             demo: true,
         };
         let cmd = Command::parse(&args).unwrap();

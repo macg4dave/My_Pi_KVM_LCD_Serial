@@ -12,7 +12,7 @@ Ship a single, ultra-light Rust daemon for Raspberry Pi 1 (ARMv6) that reads ne
 
 ## Core behavior (never change without approval)
 - **IO**: UART input via `/dev/ttyUSB0` (9600 8N1) by default; config/CLI overrides may point to `/dev/ttyAMA0`, `/dev/ttyS*`, or USB adapters as long as they speak the same framing. LCD output via HD44780 + PCF8574 @ 0x27. No Wi-Fi, Bluetooth, sockets, HTTP, USB HID, or other transports.
-- **CLI**: binary currently invoked as `seriallcd` for compatibility. Supported flags: `--run`, `--test-lcd`, `--test-serial`, `--device`, `--baud`, `--cols`, `--rows`, `--demo`. Do **not** add flags or modes unless the roadmap explicitly calls for it (e.g., future `--serialsh`).
+- **CLI**: binary is now invoked as `lifelinetty` and keeps the old `seriallcd` name as a compatibility alias. Supported flags: `--run`, `--test-lcd`, `--test-serial`, `--device`, `--baud`, `--cols`, `--rows`, `--demo`. Do **not** add flags or modes unless the roadmap explicitly calls for it (e.g., future `--serialsh`).
 - **Protocols**: newline-terminated JSON or `key=value` pairs; LCD output is always two 16-character lines. Exit code 0 on success, non-zero on fatal errors.
 
 ## Storage + RAM-disk policy (mandatory)

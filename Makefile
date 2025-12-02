@@ -1,4 +1,4 @@
-BIN := seriallcd
+BIN := lifelinetty
 ARMV6_TARGET := arm-unknown-linux-musleabihf
 ARMV7_TARGET := armv7-unknown-linux-gnueabihf
 AARCH64_TARGET := aarch64-unknown-linux-gnu
@@ -8,11 +8,11 @@ ARMV6_DIR := $(OUT_ROOT)/armv6
 ARMV7_DIR := $(OUT_ROOT)/armv7
 AARCH64_DIR := $(OUT_ROOT)/arm64
 EXT := $(if $(filter Windows_NT,$(OS)),.exe,)
-ARMV6_DOCKER_IMAGE := seriallcd:armv6
+ARMV6_DOCKER_IMAGE := lifelinetty:armv6
 ARMV6_DOCKERFILE := docker/Dockerfile.armv6
-ARMV7_DOCKER_IMAGE := seriallcd:armv7
+ARMV7_DOCKER_IMAGE := lifelinetty:armv7
 ARMV7_DOCKERFILE := docker/Dockerfile.armv7
-ARM64_DOCKER_IMAGE := seriallcd:arm64
+ARM64_DOCKER_IMAGE := lifelinetty:arm64
 ARM64_DOCKERFILE := docker/Dockerfile.arm64
 
 .PHONY: all x86 armv6 armv7 arm64 test lint clean

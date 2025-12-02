@@ -138,8 +138,6 @@ impl RenderFrame {
         let bar_row = if bar_percent.is_some() {
             if payload.bar_line1.unwrap_or(false) {
                 Some(0)
-            } else if payload.bar_line2.unwrap_or(true) {
-                Some(1)
             } else {
                 Some(1)
             }

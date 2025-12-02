@@ -18,11 +18,10 @@ impl Button {
             Some(p) => p,
             None => return Err(Error::InvalidArgs("no button pin configured".into())),
         };
-        let gpio = rppal::gpio::Gpio::new()
-            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        let gpio = rppal::gpio::Gpio::new().map_err(|e| Error::Io(std::io::Error::other(e)))?;
         let input = gpio
             .get(pin)
-            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?
+            .map_err(|e| Error::Io(std::io::Error::other(e)))?
             .into_input_pullup();
         Ok(Self {
             pin: input,

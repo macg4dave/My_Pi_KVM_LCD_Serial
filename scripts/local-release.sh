@@ -117,10 +117,10 @@ CRATE_VERSION="$(
 import json, sys
 meta = json.load(sys.stdin)
 for pkg in meta.get("packages", []):
-    if pkg.get("name") == "seriallcd":
+    if pkg.get("name") == "lifelinetty":
         print(pkg.get("version"))
         sys.exit(0)
-print("Failed to find seriallcd in cargo metadata", file=sys.stderr)
+print("Failed to find lifelinetty in cargo metadata", file=sys.stderr)
 sys.exit(1)
 '
 )"
@@ -147,7 +147,7 @@ package_artifacts() {
     local deb_args_str="$4"
     local rpm_args_str="$5"
 
-    local BIN_PATH="${ROOT}/${target_dir}/release/seriallcd"
+    local BIN_PATH="${ROOT}/${target_dir}/release/lifelinetty"
     local DEB_DIR="${ROOT}/${target_dir}/debian"
     local RPM_DIR="${ROOT}/${target_dir}/generate-rpm"
 
@@ -202,8 +202,8 @@ EOS
 
     local DEB_PATH
     local RPM_PATH
-    DEB_PATH="$(ls -t "${DEB_DIR}"/seriallcd_*.deb 2>/dev/null | head -n 1 || true)"
-    RPM_PATH="$(ls -t "${RPM_DIR}"/seriallcd-*.rpm 2>/dev/null | head -n 1 || true)"
+    DEB_PATH="$(ls -t "${DEB_DIR}"/lifelinetty_*.deb 2>/dev/null | head -n 1 || true)"
+    RPM_PATH="$(ls -t "${RPM_DIR}"/lifelinetty-*.rpm 2>/dev/null | head -n 1 || true)"
 
     if [[ -z "${DEB_PATH}" ]]; then
         echo "No .deb artifact found in ${DEB_DIR}" >&2
@@ -215,9 +215,9 @@ EOS
         exit 1
     fi
 
-    local BIN_OUT="${OUT_DIR}/seriallcd_v${CRATE_VERSION}_${arch_label}"
-    local DEB_OUT="${OUT_DIR}/seriallcd_v${CRATE_VERSION}_${arch_label}.deb"
-    local RPM_OUT="${OUT_DIR}/seriallcd_v${CRATE_VERSION}_${arch_label}.rpm"
+    local BIN_OUT="${OUT_DIR}/lifelinetty_v${CRATE_VERSION}_${arch_label}"
+    local DEB_OUT="${OUT_DIR}/lifelinetty_v${CRATE_VERSION}_${arch_label}.deb"
+    local RPM_OUT="${OUT_DIR}/lifelinetty_v${CRATE_VERSION}_${arch_label}.rpm"
 
     cp "${BIN_PATH}" "${BIN_OUT}"
     cp "${DEB_PATH}" "${DEB_OUT}"
@@ -251,7 +251,7 @@ build_with_cargo() {
         target_dir="target/${triple}"
     fi
 
-    echo "Building seriallcd ${CRATE_VERSION} (${arch_label})..."
+    echo "Building lifelinetty ${CRATE_VERSION} (${arch_label})..."
     cargo build "${build_args[@]}"
     package_artifacts "${triple}" "${arch_label}" "${target_dir}" "${deb_args[*]}" "${rpm_args[*]}"
 }
@@ -268,10 +268,10 @@ build_with_docker() {
     require_cmd docker
     mkdir -p "${release_dir}"
 
-    echo "Building seriallcd ${CRATE_VERSION} (${arch_label}) via Docker (${platform})..."
+    echo "Building lifelinetty ${CRATE_VERSION} (${arch_label}) via Docker (${platform})..."
     docker buildx build --platform "${platform}" --load -f "${dockerfile}" -t "${image}" "${ROOT}"
     cid=$(docker create "${image}")
-    docker cp "${cid}:/usr/local/bin/seriallcd" "${release_dir}/seriallcd"
+    docker cp "${cid}:/usr/local/bin/lifelinetty" "${release_dir}/lifelinetty"
     docker rm "${cid}" >/dev/null
 
     local deb_args=(--no-build --target "${triple}")
@@ -290,13 +290,13 @@ for TARGET_TRIPLE in "${TARGETS[@]}"; do
             build_with_cargo "" "${arch_label}"
             ;;
         arm-unknown-linux-musleabihf)
-            build_with_docker "${TARGET_TRIPLE}" "${arch_label}" "linux/arm/v6" "docker/Dockerfile.armv6" "seriallcd:armv6"
+            build_with_docker "${TARGET_TRIPLE}" "${arch_label}" "linux/arm/v6" "docker/Dockerfile.armv6" "lifelinetty:armv6"
             ;;
         armv7-unknown-linux-gnueabihf)
-            build_with_docker "${TARGET_TRIPLE}" "${arch_label}" "linux/arm/v7" "docker/Dockerfile.armv7" "seriallcd:armv7"
+            build_with_docker "${TARGET_TRIPLE}" "${arch_label}" "linux/arm/v7" "docker/Dockerfile.armv7" "lifelinetty:armv7"
             ;;
         aarch64-unknown-linux-gnu)
-            build_with_docker "${TARGET_TRIPLE}" "${arch_label}" "linux/arm64/v8" "docker/Dockerfile.arm64" "seriallcd:arm64"
+            build_with_docker "${TARGET_TRIPLE}" "${arch_label}" "linux/arm64/v8" "docker/Dockerfile.arm64" "lifelinetty:arm64"
             ;;
         *)
             build_with_cargo "${TARGET_TRIPLE}" "${arch_label}"
@@ -317,7 +317,7 @@ if [[ "${UPLOAD}" -eq 1 ]]; then
         gh release upload "${RELEASE_TAG}" "${UPLOAD_ASSETS[@]}" --clobber
     else
         gh release create "${RELEASE_TAG}" "${UPLOAD_ASSETS[@]}" \
-            --title "seriallcd ${CRATE_VERSION}" \
-            --notes "Local release build for seriallcd ${CRATE_VERSION}"
+            --title "lifelinetty ${CRATE_VERSION}" \
+            --notes "Local release build for lifelinetty ${CRATE_VERSION}"
     fi
 fi

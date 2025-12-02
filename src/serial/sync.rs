@@ -22,12 +22,7 @@ impl SerialPort {
         let port = serialport::new(device, baud)
             .timeout(std::time::Duration::from_millis(500))
             .open()
-            .map_err(|e| {
-                Error::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                ))
-            })?;
+            .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
 
         Ok(Self {
             device: device.to_string(),
@@ -68,7 +63,7 @@ impl SerialPort {
                     total += 1;
                     if total > MAX_FRAME_BYTES {
                         // Drain until newline to avoid contaminating the next frame.
-                        while let Ok(_) = port.read(&mut byte) {
+                        while port.read(&mut byte).is_ok() {
                             if byte[0] == b'\n' {
                                 break;
                             }

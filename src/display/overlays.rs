@@ -134,7 +134,7 @@ fn render_bar(percent: u8, width: usize) -> String {
         return String::new();
     }
 
-    let max_level = (BAR_LEVELS.len() - 1) as usize;
+    let max_level = BAR_LEVELS.len() - 1;
     let total_units = width * max_level;
     let filled_units = (percent as usize * total_units) / 100;
     let mut s = String::with_capacity(width);

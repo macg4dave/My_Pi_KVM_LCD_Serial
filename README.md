@@ -320,3 +320,12 @@ Enjoy the project — and watch for the companion **lifelinetty‑send** tool co
 ## Legacy name: SerialLCD
 
 This project was originally called **SerialLCD**. The last release under that name is tagged as `seriallcd-v1.0.0`. Behaviour remains compatible; only the binary and project branding have changed.
+
+Migration notes:
+
+- The binary is now `lifelinetty` and packaged releases provide a compatibility copy at `/usr/bin/seriallcd` to keep legacy scripts working.
+- The primary systemd unit is `lifelinetty.service`. Installer scripts will create a `seriallcd.service` symlink for compatibility — it's recommended to enable `lifelinetty.service` going forward.
+- `~/.serial_lcd/config.toml` remains the configuration file path and is unchanged.
+- CLI behavior and flags are compatible with previous releases; for logging, `LIFELINETTY_LOG_*` env variables are preferred, but `SERIALLCD_LOG_*` is still accepted.
+
+If you maintain scripts or deployments that assume `seriallcd`, update them to `lifelinetty` (or keep `seriallcd` as the alias until you can migrate).

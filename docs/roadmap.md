@@ -13,7 +13,7 @@ LifelineTTY is the successor to SerialLCD: a single Rust daemon for Raspberry Pi
 
 ## Blockers (must fix before new scope)
 
-1. **B1 — Finish rename to LifelineTTY everywhere**: README, `docs/architecture.md`, `docs/releasing.md`, `lifelinetty.service`, `seriallcd.service`, packaging scripts, and tests still reference `seriallcd`. Update binary names, service descriptions, and example commands without breaking CLI compatibility.
+1. **B1 — Finish rename to LifelineTTY everywhere (Done)**: README, `docs/architecture.md`, `docs/releasing.md`, `lifelinetty.service`, `seriallcd.service`, packaging scripts, Dockerfiles, Makefile, and tests were updated to replace `seriallcd` with `lifelinetty`. Compatibility aliases (`/usr/bin/seriallcd`, `seriallcd.service`) remain in packaging for backwards compatibility. Update further, if needed, via the P1 lint & doc cleanup task.
 2. **B2 — Charter + instructions alignment**: keep `.github/copilot-instructions.md`, README, and prompt files synchronized on the `/dev/ttyUSB0 @ 9600` defaults and the expectation that config overrides can point at `/dev/ttyAMA0`, `/dev/ttyS0`, USB adapters, etc.
 3. **B3 — Config + cache policy audit**: search for any path writes outside `/run/serial_lcd_cache` or `~/.serial_lcd/config.toml`. Add tests in `tests/bin_smoke.rs` to ensure temporary files respect the cache.
 4. **B4 — CLI docs/tests parity**: README and `tests/bin_smoke.rs` must document + test `--demo`, `--cols`, `--rows`, etc. Add missing coverage and doc sections.

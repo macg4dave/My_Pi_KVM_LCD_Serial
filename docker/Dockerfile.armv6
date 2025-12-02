@@ -44,7 +44,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM --platform=linux/arm/v6 scratch AS runtime
 ARG TARGET=arm-unknown-linux-musleabihf
 
-COPY --from=builder /app/target/${TARGET}/release/seriallcd /usr/local/bin/seriallcd
+COPY --from=builder /app/target/${TARGET}/release/lifelinetty /usr/local/bin/lifelinetty
 
-ENTRYPOINT ["/usr/local/bin/seriallcd"]
+ENTRYPOINT ["/usr/local/bin/lifelinetty"]
 CMD ["--run"]

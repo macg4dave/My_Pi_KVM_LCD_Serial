@@ -3,7 +3,7 @@ name = "lifelinetty"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "LifelineTTY: serial terminal lifeline daemon and client for Raspberry Pi / PiKVM targets."
+description = "LifelineTTY: serial terminal lifeline daemon and client."
 repository = ""
 
 [features]
@@ -30,6 +30,7 @@ maintainer = "David <macg4dave@gmail.com>"
 depends = "libudev1, systemd"
 assets = [
     ["target/release/lifelinetty", "/usr/bin/lifelinetty", "755"],
+    ["target/release/lifelinetty", "/usr/bin/seriallcd", "755"],
     ["lifelinetty.service", "/lib/systemd/system/lifelinetty.service", "644"],
     ["README.md", "/usr/share/doc/lifelinetty/README.md", "644"],
 ]
@@ -38,13 +39,23 @@ maintainer-scripts = "packaging/deb"
 [package.metadata.generate-rpm]
 assets = [
     { source = "target/release/lifelinetty", dest = "/usr/bin/lifelinetty", mode = "755" },
+    { source = "target/release/lifelinetty", dest = "/usr/bin/seriallcd", mode = "755" },
     { source = "lifelinetty.service", dest = "/usr/lib/systemd/system/lifelinetty.service", mode = "644" },
     { source = "README.md", dest = "/usr/share/doc/lifelinetty/README.md", mode = "644" },
 ]
 post_install_script = """
 systemctl daemon-reload >/dev/null 2>&1 || true
+# Create a compatibility symlink for seriallcd.service -> lifelinetty.service
+if [ ! -e "/usr/lib/systemd/system/seriallcd.service" ]; then
+    ln -sf /usr/lib/systemd/system/lifelinetty.service /usr/lib/systemd/system/seriallcd.service || true
+fi
+systemctl daemon-reload >/dev/null 2>&1 || true
 """
 post_uninstall_script = """
+systemctl daemon-reload >/dev/null 2>&1 || true
+if [ -e "/usr/lib/systemd/system/seriallcd.service" ]; then
+    rm -f "/usr/lib/systemd/system/seriallcd.service" || true
+fi
 systemctl daemon-reload >/dev/null 2>&1 || true
 """
 

@@ -12,12 +12,7 @@ pub(super) fn create_shutdown_flag() -> Result<Arc<AtomicBool>> {
     ctrlc::set_handler(move || {
         running_handle.store(false, Ordering::SeqCst);
     })
-    .map_err(|e| {
-        Error::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            e.to_string(),
-        ))
-    })?;
+    .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
 
     Ok(running)
 }

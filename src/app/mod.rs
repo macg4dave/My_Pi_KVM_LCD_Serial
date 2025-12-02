@@ -171,7 +171,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
             .as_nanos();
-        dir.push(format!("seriallcd_app_test_home_{stamp}"));
+        dir.push(format!("lifelinetty_app_test_home_{stamp}"));
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("HOME", &dir);
         dir

@@ -4,7 +4,7 @@ Goal: a small daemon that converts local status into LCD lines over a serial lin
 
 ## Components
 
-- CLI (`src/cli.rs`): parses `seriallcd run` flags: `--device`, `--baud`, `--cols`, `--rows`. Defaults: `/dev/ttyUSB0`, `9600`, `20x4`, but config/CLI overrides can point at `/dev/ttyAMA0`, `/dev/ttyS0`, USB adapters, etc.
+- CLI (`src/cli.rs`): parses `lifelinetty run` flags: `--device`, `--baud`, `--cols`, `--rows`. Defaults: `/dev/ttyUSB0`, `9600`, `20x4`, but config/CLI overrides can point at `/dev/ttyAMA0`, `/dev/ttyS0`, USB adapters, etc.
 - App (`src/app.rs`): owns configuration, opens serial, initializes LCD, and runs the refresh loop (to be implemented).
 - Serial (`src/serial.rs`): placeholder for UART transport; will frame and send bytes to the LCD controller or bridge MCU.
 - LCD (`src/lcd.rs`): placeholder for line/row writes and boot messages; will translate text into controller commands.
@@ -13,8 +13,8 @@ Goal: a small daemon that converts local status into LCD lines over a serial lin
 ## Invariants to keep
 
 - No network IO.
-- Only one binary: `seriallcd`.
-- CLI and protocol stability: once flags and serial framing are defined, treat them as stable contracts.
+- Only one binary: `lifelinetty`.
+ - CLI and protocol stability: once flags and serial framing are defined, treat them as stable contracts.
 - Clear error handling: prefer typed errors; no `unwrap()` in production paths.
 
 ## Open design questions (fill before coding further)

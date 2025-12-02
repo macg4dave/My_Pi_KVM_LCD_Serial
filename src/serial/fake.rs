@@ -1,4 +1,7 @@
-use crate::{Error, Result};
+use crate::Result;
+
+#[cfg(test)]
+use crate::Error;
 use std::collections::VecDeque;
 
 /// Minimal fake serial port used in tests to script reads/writes.

@@ -13,7 +13,7 @@ This setup builds an `arm-unknown-linux-musleabihf` binary (static musl) and a r
 docker buildx build \
   --platform linux/arm/v6 \
   -f docker/Dockerfile.armv6 \
-  -t seriallcd:armv6 \
+  -t lifelinetty:armv6 \
   .
 ```
 
@@ -26,7 +26,7 @@ Defaults:
 
 - Target: `arm-unknown-linux-musleabihf`
 - CPU tuning: `-C target-cpu=arm1176jzf-s -C target-feature=+vfp2` for BCM2835 (Pi 1 / Zero)
-- Entry: `seriallcd --run`
+ - Entry: `lifelinetty --run`
 
 ## Debug build (optional)
 
@@ -35,17 +35,17 @@ docker buildx build \
   --platform linux/arm/v6 \
   -f docker/Dockerfile.armv6 \
   --build-arg RUSTFLAGS="-C target-cpu=arm1176jzf-s -C target-feature=+vfp2 -C debuginfo=2" \
-  -t seriallcd:armv6-debug \
+  -t lifelinetty:armv6-debug \
   .
 ```
 
 ## Running the image (on a Pi)
 
 ```sh
-docker run --rm --name seriallcd \
+docker run --rm --name lifelinetty \
   --device /dev/ttyUSB0 \
   --device /dev/i2c-1 \
-  seriallcd:armv6 --run
+  lifelinetty:armv6 --run
 ```
 
 ## Notes

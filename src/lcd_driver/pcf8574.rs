@@ -3,10 +3,7 @@ use crate::{lcd_driver::I2cBus, Error, Result};
 #[cfg(target_os = "linux")]
 fn map_i2c_err(err: rppal::i2c::Error) -> Error {
     // Wrap rppal errors so the caller sees a standard IO error payload.
-    Error::Io(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        err.to_string(),
-    ))
+    Error::Io(std::io::Error::other(err.to_string()))
 }
 
 /// Linux implementation using rppal's I2C.
@@ -93,10 +90,8 @@ impl I2cBus for RppalBus {
 #[cfg(target_os = "linux")]
 fn detect_address(bus: &mut rppal::i2c::I2c, candidates: &[u8], fallback: u8) -> u8 {
     for &addr in candidates {
-        if bus.set_slave_address(addr as u16).is_ok() {
-            if bus.block_write(0, &[]).is_ok() {
-                return addr;
-            }
+        if bus.set_slave_address(addr as u16).is_ok() && bus.block_write(0, &[]).is_ok() {
+            return addr;
         }
     }
     fallback

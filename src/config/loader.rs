@@ -37,7 +37,7 @@ pub fn save_to_path(config: &Config, path: &Path) -> Result<()> {
     }
 
     let contents = format!(
-        "# seriallcd config\n\
+        "# lifelinetty config\n\
 device = \"{}\"\n\
 baud = {}\n\
 cols = {}\n\
@@ -167,7 +167,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis();
-        std::env::temp_dir().join(format!("seriallcd_home_{name}_{stamp}"))
+        std::env::temp_dir().join(format!("lifelinetty_home_{name}_{stamp}"))
     }
 
     fn temp_path(name: &str) -> PathBuf {
@@ -175,7 +175,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis();
-        std::env::temp_dir().join(format!("seriallcd_test_{name}_{stamp}"))
+        std::env::temp_dir().join(format!("lifelinetty_test_{name}_{stamp}"))
     }
 
     #[test]

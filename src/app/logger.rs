@@ -3,19 +3,14 @@ use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Log verbosity levels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum LogLevel {
     Error = 0,
     Warn = 1,
+    #[default]
     Info = 2,
     Debug = 3,
     Trace = 4,
-}
-
-impl Default for LogLevel {
-    fn default() -> Self {
-        LogLevel::Info
-    }
 }
 
 impl FromStr for LogLevel {
@@ -40,12 +35,15 @@ pub struct Logger {
 
 impl Logger {
     pub fn new(level: LogLevel, file_path: Option<String>) -> Self {
-        let env_level = std::env::var("SERIALLCD_LOG_LEVEL")
+        let env_level = std::env::var("LIFELINETTY_LOG_LEVEL")
+            .or_else(|_| std::env::var("SERIALLCD_LOG_LEVEL"))
             .ok()
             .and_then(|s| LogLevel::from_str(&s).ok());
         let effective_level = env_level.unwrap_or(level);
 
-        let env_file = std::env::var("SERIALLCD_LOG_PATH").ok();
+        let env_file = std::env::var("LIFELINETTY_LOG_PATH")
+            .or_else(|_| std::env::var("SERIALLCD_LOG_PATH"))
+            .ok();
         let path = file_path.or(env_file);
         let file = path.and_then(|p| {
             std::fs::OpenOptions::new()
@@ -81,6 +79,7 @@ impl Logger {
         }
     }
 
+    #[allow(dead_code)]
     pub fn error(&self, msg: impl AsRef<str>) {
         self.log(LogLevel::Error, msg);
     }
@@ -97,6 +96,7 @@ impl Logger {
         self.log(LogLevel::Debug, msg);
     }
 
+    #[allow(dead_code)]
     pub fn trace(&self, msg: impl AsRef<str>) {
         self.log(LogLevel::Trace, msg);
     }
