@@ -220,7 +220,6 @@ mod tests {
             log_level: None,
             log_file: None,
             demo: false,
-            serialsh: false,
         };
         let cfg = AppConfig::from_sources(Config::default(), opts.clone());
         assert_eq!(cfg.device, "/dev/ttyUSB1");

@@ -62,15 +62,17 @@ pub fn log_backoff_event(
 fn get_file() -> io::Result<&'static Mutex<std::fs::File>> {
     if FILE_HANDLE.get().is_none() {
         let handle = create_file_handle()?;
-        let _ = FILE_HANDLE.set(handle);
+        let _ = FILE_HANDLE.set(Ok(handle));
     }
 
-    FILE_HANDLE.get().ok_or_else(|| {
-        io::Error::new(
-            ErrorKind::Other,
-            "failed to initialize serial telemetry log handle",
-        )
-    })
+    let result_ref = FILE_HANDLE.get().ok_or_else(|| {
+        io::Error::new(ErrorKind::Other, "failed to initialize serial telemetry log handle")
+    })?;
+
+    match result_ref {
+        Ok(m) => Ok(m),
+        Err(err) => Err(io::Error::new(io::ErrorKind::Other, err.to_string())),
+    }
 }
 
 fn create_file_handle() -> io::Result<Mutex<std::fs::File>> {

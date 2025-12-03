@@ -10,13 +10,9 @@ repository = "https://github.com/macg4dave/LifelineTTY"
 default = []
 # Enable async serial when needed; off by default for minimal footprint.
 async-serial = ["tokio-serial", "tokio"]
-<<<<<<< HEAD
 # P7: CLI integration groundwork uses a gated serial shell flag so
 # experimental builds can opt in without affecting releases.
 serialsh-preview = []
-=======
-serialsh-preview = []
->>>>>>> fa94790 (feat: Implement serialsh preview mode with CLI integration and command tunnel scaffolding)
 
 [dependencies]
 async-io = "2"
