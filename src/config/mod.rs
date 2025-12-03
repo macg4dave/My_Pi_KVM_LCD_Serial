@@ -1,4 +1,7 @@
-use crate::{Error, Result};
+use crate::{
+    serial::{DtrBehavior, FlowControlMode, ParityMode, StopBitsMode},
+    Error, Result,
+};
 use std::path::Path;
 
 pub mod loader;
@@ -19,6 +22,9 @@ pub const MIN_PAGE_TIMEOUT_MS: u64 = 500;
 pub const DEFAULT_PCF8574_ADDR: Pcf8574Addr = Pcf8574Addr::Auto;
 pub const DEFAULT_BACKOFF_INITIAL_MS: u64 = 500;
 pub const DEFAULT_BACKOFF_MAX_MS: u64 = 10_000;
+pub const DEFAULT_SERIAL_TIMEOUT_MS: u64 = 500;
+pub const MIN_SERIAL_TIMEOUT_MS: u64 = 50;
+pub const MAX_SERIAL_TIMEOUT_MS: u64 = 60_000;
 const CONFIG_DIR_NAME: &str = ".serial_lcd";
 const CONFIG_FILE_NAME: &str = "config.toml";
 
@@ -41,6 +47,11 @@ impl std::str::FromStr for Pcf8574Addr {
 pub struct Config {
     pub device: String,
     pub baud: u32,
+    pub flow_control: FlowControlMode,
+    pub parity: ParityMode,
+    pub stop_bits: StopBitsMode,
+    pub dtr_on_open: DtrBehavior,
+    pub serial_timeout_ms: u64,
     pub cols: u8,
     pub rows: u8,
     pub scroll_speed_ms: u64,
@@ -57,6 +68,11 @@ impl Default for Config {
         Self {
             device: DEFAULT_DEVICE.to_string(),
             baud: DEFAULT_BAUD,
+            flow_control: FlowControlMode::default(),
+            parity: ParityMode::default(),
+            stop_bits: StopBitsMode::default(),
+            dtr_on_open: DtrBehavior::default(),
+            serial_timeout_ms: DEFAULT_SERIAL_TIMEOUT_MS,
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
             scroll_speed_ms: DEFAULT_SCROLL_MS,
@@ -132,6 +148,13 @@ pub(crate) fn validate(cfg: &Config) -> Result<()> {
             ));
         }
     }
+    if cfg.serial_timeout_ms < MIN_SERIAL_TIMEOUT_MS
+        || cfg.serial_timeout_ms > MAX_SERIAL_TIMEOUT_MS
+    {
+        return Err(Error::InvalidArgs(format!(
+            "serial_timeout_ms must be between {MIN_SERIAL_TIMEOUT_MS} and {MAX_SERIAL_TIMEOUT_MS}"
+        )));
+    }
     Ok(())
 }
 
@@ -145,6 +168,7 @@ fn format_pcf_addr(addr: &Pcf8574Addr) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::serial::{DtrBehavior, FlowControlMode, ParityMode, StopBitsMode};
     use std::{
         fs,
         path::PathBuf,
@@ -219,6 +243,11 @@ mod tests {
         let cfg = Config {
             device: "/dev/ttyS1".into(),
             baud: 57_600,
+            flow_control: FlowControlMode::Hardware,
+            parity: ParityMode::Even,
+            stop_bits: StopBitsMode::Two,
+            dtr_on_open: DtrBehavior::Assert,
+            serial_timeout_ms: 750,
             cols: 20,
             rows: 4,
             scroll_speed_ms: 250,

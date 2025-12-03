@@ -31,6 +31,9 @@ mod tests {
     fn preview_run_returns_ok() {
         use super::*;
         let shell = ShellContext::preview();
-        assert!(shell.run().is_ok(), "expected preview shell run to return Ok");
+        assert!(
+            shell.run().is_ok(),
+            "expected preview shell run to return Ok"
+        );
     }
 }

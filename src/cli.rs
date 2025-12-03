@@ -1,4 +1,8 @@
-use crate::{config::Pcf8574Addr, Error, Result};
+use crate::{
+    config::Pcf8574Addr,
+    serial::{DtrBehavior, FlowControlMode, ParityMode, StopBitsMode},
+    Error, Result,
+};
 
 /// Entry mode for the `run` command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,6 +25,11 @@ pub struct RunOptions {
     pub mode: RunMode,
     pub device: Option<String>,
     pub baud: Option<u32>,
+    pub flow_control: Option<FlowControlMode>,
+    pub parity: Option<ParityMode>,
+    pub stop_bits: Option<StopBitsMode>,
+    pub dtr_on_open: Option<DtrBehavior>,
+    pub serial_timeout_ms: Option<u64>,
     pub cols: Option<u8>,
     pub rows: Option<u8>,
     pub payload_file: Option<String>,
@@ -60,13 +69,15 @@ impl Command {
                 let mut iter = flags.iter();
                 Ok(Command::Run(parse_run_options(&mut iter)?))
             }
-            Some(cmd) => Err(Error::InvalidArgs(format!("unknown command '{cmd}', try --help"))),
+            Some(cmd) => Err(Error::InvalidArgs(format!(
+                "unknown command '{cmd}', try --help"
+            ))),
             None => Ok(Command::Run(RunOptions::default())),
         }
     }
     pub fn help() -> String {
         let mut help = String::from(
-            "lifelinetty - Serial-to-LCD daemon\n\nUSAGE:\n  lifelinetty run [--device <path>] [--baud <number>] [--cols <number>] [--rows <number>] [--payload-file <path>]\n  lifelinetty --help\n  lifelinetty --version\n\nOPTIONS:\n  --device <path>   Serial device path (default: /dev/ttyUSB0)\n  --baud <number>   Baud rate (default: 9600)\n  --cols <number>   LCD columns (default: 20)\n  --rows <number>   LCD rows (default: 4)\n  --payload-file <path>  Load a local JSON payload and render it once (testing helper)\n  --backoff-initial-ms <number>  Initial reconnect backoff (default: 500)\n  --backoff-max-ms <number>      Maximum reconnect backoff (default: 10000)\n  --pcf8574-addr <auto|0xNN>     PCF8574 I2C address or 'auto' to probe (default: auto)\n  --log-level <error|warn|info|debug|trace>  Log verbosity (default: info)\n  --log-file <path>              Append logs inside /run/serial_lcd_cache (also honors LIFELINETTY_LOG_PATH)\n  --demo                         Run built-in demo pages on the LCD (no serial input)\n",
+            "lifelinetty - Serial-to-LCD daemon\n\nUSAGE:\n  lifelinetty run [--device <path>] [--baud <number>] [--cols <number>] [--rows <number>] [--payload-file <path>]\n  lifelinetty --help\n  lifelinetty --version\n\nOPTIONS:\n  --device <path>   Serial device path (default: /dev/ttyUSB0)\n  --baud <number>   Baud rate (default: 9600)\n  --flow-control <none|software|hardware>  Flow control override (default: none)\n  --parity <none|odd|even>       Parity override (default: none)\n  --stop-bits <1|2>              Stop bits override (default: 1)\n  --dtr-on-open <auto|on|off>    Control DTR state when opening the port (default: auto)\n  --serial-timeout-ms <number>   Read timeout in milliseconds (default: 500)\n  --cols <number>   LCD columns (default: 20)\n  --rows <number>   LCD rows (default: 4)\n  --payload-file <path>  Load a local JSON payload and render it once (testing helper)\n  --backoff-initial-ms <number>  Initial reconnect backoff (default: 500)\n  --backoff-max-ms <number>      Maximum reconnect backoff (default: 10000)\n  --pcf8574-addr <auto|0xNN>     PCF8574 I2C address or 'auto' to probe (default: auto)\n  --log-level <error|warn|info|debug|trace>  Log verbosity (default: info)\n  --log-file <path>              Append logs inside /run/serial_lcd_cache (also honors LIFELINETTY_LOG_PATH)\n  --demo                         Run built-in demo pages on the LCD (no serial input)\n",
         );
 
         #[cfg(feature = "serialsh-preview")]
@@ -78,10 +89,7 @@ impl Command {
 
         help.push_str("  -h, --help        Show this help\n  -V, --version     Show version\n");
         help
-    
     }
-
-    
 
     pub fn print_help() {
         println!("{}", Self::help());
@@ -100,6 +108,28 @@ fn parse_run_options(iter: &mut std::slice::Iter<String>) -> Result<RunOptions> 
                 let raw = take_value(flag, iter)?;
                 opts.baud = Some(raw.parse().map_err(|_| {
                     Error::InvalidArgs("baud must be a positive integer".to_string())
+                })?);
+            }
+            "--flow-control" => {
+                let raw = take_value(flag, iter)?;
+                opts.flow_control = Some(raw.parse().map_err(|e: String| Error::InvalidArgs(e))?);
+            }
+            "--parity" => {
+                let raw = take_value(flag, iter)?;
+                opts.parity = Some(raw.parse().map_err(|e: String| Error::InvalidArgs(e))?);
+            }
+            "--stop-bits" => {
+                let raw = take_value(flag, iter)?;
+                opts.stop_bits = Some(raw.parse().map_err(|e: String| Error::InvalidArgs(e))?);
+            }
+            "--dtr-on-open" => {
+                let raw = take_value(flag, iter)?;
+                opts.dtr_on_open = Some(raw.parse().map_err(|e: String| Error::InvalidArgs(e))?);
+            }
+            "--serial-timeout-ms" => {
+                let raw = take_value(flag, iter)?;
+                opts.serial_timeout_ms = Some(raw.parse().map_err(|_| {
+                    Error::InvalidArgs("serial-timeout-ms must be a positive integer".to_string())
                 })?);
             }
             "--cols" => {
@@ -152,7 +182,7 @@ fn parse_run_options(iter: &mut std::slice::Iter<String>) -> Result<RunOptions> 
                 // P7: expose the serial shell gate while milestone A wiring lands.
                 opts.mode = RunMode::SerialShell;
             }
-              other => {
+            other => {
                 return Err(Error::InvalidArgs(format!(
                     "unknown flag '{other}', try --help"
                 )));
@@ -207,6 +237,16 @@ mod tests {
             "16".into(),
             "--rows".into(),
             "2".into(),
+            "--flow-control".into(),
+            "hardware".into(),
+            "--parity".into(),
+            "even".into(),
+            "--stop-bits".into(),
+            "2".into(),
+            "--dtr-on-open".into(),
+            "on".into(),
+            "--serial-timeout-ms".into(),
+            "1500".into(),
             "--payload-file".into(),
             "/tmp/payload.json".into(),
             "--backoff-initial-ms".into(),
@@ -225,6 +265,11 @@ mod tests {
             mode: RunMode::Daemon,
             device: Some("/dev/ttyUSB0".into()),
             baud: Some(9600),
+            flow_control: Some(FlowControlMode::Hardware),
+            parity: Some(ParityMode::Even),
+            stop_bits: Some(StopBitsMode::Two),
+            dtr_on_open: Some(DtrBehavior::Assert),
+            serial_timeout_ms: Some(1500),
             cols: Some(16),
             rows: Some(2),
             payload_file: Some("/tmp/payload.json".into()),
@@ -251,6 +296,11 @@ mod tests {
             mode: RunMode::Daemon,
             device: Some("/dev/ttyS1".into()),
             baud: None,
+            flow_control: None,
+            parity: None,
+            stop_bits: None,
+            dtr_on_open: None,
+            serial_timeout_ms: None,
             cols: None,
             rows: None,
             payload_file: Some("/tmp/payload.json".into()),

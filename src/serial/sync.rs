@@ -1,5 +1,9 @@
 use crate::{state::MAX_FRAME_BYTES, Error, Result};
+use serialport::{DataBits, FlowControl, Parity, StopBits};
 use std::io;
+use std::time::Duration;
+
+use super::{DtrBehavior, FlowControlMode, ParityMode, SerialOptions, StopBitsMode};
 
 /// Lightweight serial placeholder. Replace with a real transport later.
 #[derive(Debug)]
@@ -12,21 +16,31 @@ pub struct SerialPort {
 }
 
 impl SerialPort {
-    pub fn connect(device: &str, baud: u32) -> Result<Self> {
+    pub fn connect(device: &str, options: SerialOptions) -> Result<Self> {
         if device.is_empty() {
             return Err(Error::InvalidArgs(
                 "device path cannot be empty".to_string(),
             ));
         }
 
-        let port = serialport::new(device, baud)
-            .timeout(std::time::Duration::from_millis(500))
-            .open()
-            .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
+        let mut builder = serialport::new(device, options.baud)
+            .data_bits(DataBits::Eight)
+            .parity(to_serial_parity(options.parity))
+            .stop_bits(to_serial_stop_bits(options.stop_bits))
+            .flow_control(to_serial_flow(options.flow_control))
+            .timeout(Duration::from_millis(options.timeout_ms));
+
+        builder = match options.dtr {
+            DtrBehavior::Preserve => builder,
+            DtrBehavior::Assert => builder.dtr_on_open(true),
+            DtrBehavior::Deassert => builder.dtr_on_open(false),
+        };
+
+        let port = builder.open().map_err(map_serial_error)?;
 
         Ok(Self {
             device: device.to_string(),
-            baud,
+            baud: options.baud,
             port: Some(port),
         })
     }
@@ -106,19 +120,57 @@ impl<'a> std::io::Read for SerialReader<'a> {
     }
 }
 
+fn map_serial_error(err: serialport::Error) -> Error {
+    use serialport::ErrorKind;
+
+    let kind = match err.kind() {
+        ErrorKind::NoDevice => io::ErrorKind::NotFound,
+        ErrorKind::InvalidInput => io::ErrorKind::InvalidInput,
+        ErrorKind::Io(inner) => inner,
+        ErrorKind::Unknown => io::ErrorKind::Other,
+    };
+
+    Error::Io(io::Error::new(kind, err))
+}
+
+fn to_serial_flow(mode: FlowControlMode) -> FlowControl {
+    match mode {
+        FlowControlMode::None => FlowControl::None,
+        FlowControlMode::Software => FlowControl::Software,
+        FlowControlMode::Hardware => FlowControl::Hardware,
+    }
+}
+
+fn to_serial_parity(mode: ParityMode) -> Parity {
+    match mode {
+        ParityMode::None => Parity::None,
+        ParityMode::Odd => Parity::Odd,
+        ParityMode::Even => Parity::Even,
+    }
+}
+
+fn to_serial_stop_bits(mode: StopBitsMode) -> StopBits {
+    match mode {
+        StopBitsMode::One => StopBits::One,
+        StopBitsMode::Two => StopBits::Two,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn rejects_empty_device() {
-        let err = SerialPort::connect("", 9600).unwrap_err();
+        let err = SerialPort::connect("", SerialOptions::default()).unwrap_err();
         assert!(format!("{err}").contains("device path cannot be empty"));
     }
 
     #[test]
     fn connects_or_returns_io_error() {
-        let res = SerialPort::connect("/dev/ttyUSB0", 9600);
+        let mut opts = SerialOptions::default();
+        opts.baud = 9_600;
+        let res = SerialPort::connect("/dev/ttyUSB0", opts);
         match res {
             Ok(port) => {
                 assert_eq!(port.device, "/dev/ttyUSB0");

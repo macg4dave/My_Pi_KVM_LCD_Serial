@@ -171,7 +171,7 @@ pub(super) fn run_render_loop(
                 ));
                 max_backoff_warned = true;
             }
-            match attempt_serial_connect(logger, &config.device, config.baud) {
+            match attempt_serial_connect(logger, &config.device, config.serial_options()) {
                 Some(p) => {
                     log_backoff(
                         logger,
@@ -247,22 +247,37 @@ pub(super) fn run_render_loop(
                                     match Config::load_or_default() {
                                         Ok(new_cfg) => {
                                             let old_device = config.device.clone();
-                                            let old_baud = config.baud;
+                                            let old_serial = config.serial_options();
                                             let old_scroll = config.scroll_speed_ms;
                                             let old_page = config.page_timeout_ms;
+
                                             config.scroll_speed_ms = new_cfg.scroll_speed_ms;
                                             config.page_timeout_ms = new_cfg.page_timeout_ms;
                                             config.backoff_initial_ms = new_cfg.backoff_initial_ms;
                                             config.backoff_max_ms = new_cfg.backoff_max_ms;
-                                            if config.device != new_cfg.device
-                                                || config.baud != new_cfg.baud
+                                            config.device = new_cfg.device;
+                                            config.baud = new_cfg.baud;
+                                            config.flow_control = new_cfg.flow_control;
+                                            config.parity = new_cfg.parity;
+                                            config.stop_bits = new_cfg.stop_bits;
+                                            config.dtr_on_open = new_cfg.dtr_on_open;
+                                            config.serial_timeout_ms = new_cfg.serial_timeout_ms;
+
+                                            let new_serial = config.serial_options();
+
+                                            if old_device != config.device
+                                                || old_serial != new_serial
                                             {
                                                 logger.info(format!(
-                                                    "config reload updating serial to {} @ {} (was {} @ {})",
-                                                    new_cfg.device, new_cfg.baud, old_device, old_baud
+                                                    "config reload updating serial to {} @ {} (flow={}, parity={}, stop_bits={}, dtr={}, timeout={}ms)",
+                                                    config.device,
+                                                    config.baud,
+                                                    config.flow_control,
+                                                    config.parity,
+                                                    config.stop_bits,
+                                                    config.dtr_on_open,
+                                                    config.serial_timeout_ms
                                                 ));
-                                                config.device = new_cfg.device;
-                                                config.baud = new_cfg.baud;
                                                 serial_connection = None;
                                                 reconnect_displayed = false;
                                                 offline_displayed = false;

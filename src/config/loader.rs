@@ -45,6 +45,11 @@ pub fn save_to_path(config: &Config, path: &Path) -> Result<()> {
         "# lifelinetty config\n\
 device = \"{}\"\n\
 baud = {}\n\
+flow_control = \"{}\"\n\
+parity = \"{}\"\n\
+stop_bits = \"{}\"\n\
+dtr_on_open = \"{}\"\n\
+serial_timeout_ms = {}\n\
 cols = {}\n\
 rows = {}\n\
 scroll_speed_ms = {}\n\
@@ -55,6 +60,11 @@ backoff_initial_ms = {}\n\
 backoff_max_ms = {}\n",
         config.device,
         config.baud,
+        config.flow_control,
+        config.parity,
+        config.stop_bits,
+        config.dtr_on_open,
+        config.serial_timeout_ms,
         config.cols,
         config.rows,
         config.scroll_speed_ms,
@@ -92,6 +102,31 @@ pub fn parse(raw: &str) -> Result<Config> {
             "baud" => {
                 cfg.baud = value.parse().map_err(|_| {
                     Error::InvalidArgs(format!("invalid baud value on line {}", idx + 1))
+                })?;
+            }
+            "flow_control" => {
+                cfg.flow_control = value.parse().map_err(|e: String| {
+                    Error::InvalidArgs(format!("invalid flow_control on line {}: {e}", idx + 1))
+                })?;
+            }
+            "parity" => {
+                cfg.parity = value.parse().map_err(|e: String| {
+                    Error::InvalidArgs(format!("invalid parity on line {}: {e}", idx + 1))
+                })?;
+            }
+            "stop_bits" => {
+                cfg.stop_bits = value.parse().map_err(|e: String| {
+                    Error::InvalidArgs(format!("invalid stop_bits on line {}: {e}", idx + 1))
+                })?;
+            }
+            "dtr_on_open" => {
+                cfg.dtr_on_open = value.parse().map_err(|e: String| {
+                    Error::InvalidArgs(format!("invalid dtr_on_open on line {}: {e}", idx + 1))
+                })?;
+            }
+            "serial_timeout_ms" => {
+                cfg.serial_timeout_ms = value.parse().map_err(|_| {
+                    Error::InvalidArgs(format!("invalid serial_timeout_ms on line {}", idx + 1))
                 })?;
             }
             "cols" => {
@@ -225,6 +260,7 @@ fn format_string_array(values: &[String]) -> String {
 mod tests {
     use super::*;
     use crate::config::{Config, Pcf8574Addr, DEFAULT_BACKOFF_INITIAL_MS, DEFAULT_BACKOFF_MAX_MS};
+    use crate::serial::{DtrBehavior, FlowControlMode, ParityMode, StopBitsMode};
     use std::{
         fs,
         path::PathBuf,
@@ -260,6 +296,11 @@ mod tests {
         let contents = r#"
             device = "/dev/ttyUSB0"
             baud = 9600
+            flow_control = "hardware"
+            parity = "even"
+            stop_bits = "2"
+            dtr_on_open = "on"
+            serial_timeout_ms = 1500
             cols = 16
             rows = 2
             scroll_speed_ms = 300
@@ -273,6 +314,11 @@ mod tests {
         let cfg = load_from_path(&path).unwrap();
         assert_eq!(cfg.device, "/dev/ttyUSB0");
         assert_eq!(cfg.baud, 9600);
+        assert_eq!(cfg.flow_control, FlowControlMode::Hardware);
+        assert_eq!(cfg.parity, ParityMode::Even);
+        assert_eq!(cfg.stop_bits, StopBitsMode::Two);
+        assert_eq!(cfg.dtr_on_open, DtrBehavior::Assert);
+        assert_eq!(cfg.serial_timeout_ms, 1500);
         assert_eq!(cfg.cols, 16);
         assert_eq!(cfg.rows, 2);
         assert_eq!(cfg.scroll_speed_ms, 300);
@@ -317,6 +363,11 @@ mod tests {
         let cfg = Config {
             device: "/dev/ttyS1".into(),
             baud: 57_600,
+            flow_control: FlowControlMode::Hardware,
+            parity: ParityMode::Even,
+            stop_bits: StopBitsMode::Two,
+            dtr_on_open: DtrBehavior::Deassert,
+            serial_timeout_ms: 1200,
             cols: 20,
             rows: 4,
             scroll_speed_ms: 250,

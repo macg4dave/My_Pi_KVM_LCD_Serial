@@ -27,7 +27,7 @@ impl SerialShellTransport for SerialPort {
 pub fn run_serial_shell(opts: RunOptions) -> Result<()> {
     let cfg = Config::load_or_default()?;
     let merged = AppConfig::from_sources(cfg, opts);
-    let mut serial = SerialPort::connect(&merged.device, merged.baud)?;
+    let mut serial = SerialPort::connect(&merged.device, merged.serial_options())?;
     let stdin = io::stdin();
     let mut stdin_lock = stdin.lock();
     let mut stdout = io::stdout();

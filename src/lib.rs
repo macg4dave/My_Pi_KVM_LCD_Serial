@@ -4,12 +4,12 @@ pub mod config;
 pub mod display;
 pub mod lcd;
 pub mod lcd_driver;
+pub mod milestones;
 pub mod payload;
 pub mod serial;
 #[cfg(feature = "async-serial")]
 pub mod serial_async;
 pub mod state;
-pub mod milestones;
 
 pub const CACHE_DIR: &str = "/run/serial_lcd_cache";
 

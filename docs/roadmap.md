@@ -48,6 +48,7 @@ There is also a short frameworks document that describes the set of skeleton mod
 | **P17** | **Remote file integrity tooling**: CLI helper to verify checksums and list staged chunks in `/run/serial_lcd_cache`. |
 | **P18** | **Config-driven polling profiles**: allow `profiles` table in `config.toml` to customize polling intervals per metric, validated via tests. |
 | **P19** | **Documentation + sample payload refresh**: update `README.md`, `samples/payload_examples*.json`, and `docs/lcd_patterns.md` showing new modes and tunnels. |
+| **P20 (⚙️ in progress — 4 Dec 2025)** | **Serial transport resilience**: finalize explicit 8N1 + flow-control defaults in code, expose DTR/RTS toggles + timeout knobs via config for upcoming tunnels, and add structured error mapping/logs so reconnect logic can distinguish permission, unplug, and framing failures before Milestones A–C. _(Update: CLI + config now surface flow-control, parity, stop-bits, DTR, and timeout knobs; next up is richer error mapping/logging.)_ |
 
 ## Crate guidance for roadmap alignment
 
@@ -122,11 +123,10 @@ Update this section or `docs/createstocheck.md` whenever priorities shift so the
 - **Dependencies**: P11, P15, P18.
 - **Constraints**: polling intervals must be configurable
 - **Workflow**:
-  1. Build polling module with systemstat crate or (e.g., `src/app/polling.rs`) that reads `/proc` and `/sys` metrics with non-blocking IO.
+  1. Build polling module with systemstat crate.
   2. Publish metrics into render queue via channels guarded by `std::sync::mpsc` or `crossbeam` (if later approved) to avoid blocking serial ingestion.
   3. Implement heartbeat packets (serde structs) and integrate into render loop timers; fallback to offline screen if missed.
-  4. Add config knobs in `config.toml` and tests verifying defaults + overrides.
-- **Crates & tooling**: standard library (`std::fs`, `std::time`), `linux-embedded-hal` (if GPIO-based sensors), `log` for watchdog alerts, optional `tokio` timers if async polling chosen. systemstat or similar crate for metrics gathering.
+- **Crates & tooling**: `os_info` for system information, `log` for watchdog alerts, optional `tokio` timers if async polling chosen. systemstat or similar crate for metrics gathering.
 
 ### Milestone E — LCD/Display Output Mode Expansion
 

@@ -185,6 +185,11 @@ Example:
 ```toml
 device = "/dev/ttyUSB0"
 baud = 9600
+flow_control = "none"
+parity = "none"
+stop_bits = "1"
+dtr_on_open = "auto"
+serial_timeout_ms = 500
 cols = 20
 rows = 4
 scroll_speed_ms = 250
@@ -194,6 +199,11 @@ button_gpio_pin = null
 backoff_initial_ms = 500
 backoff_max_ms = 10000
 ```
+
+Advanced serial knobs — `flow_control`, `parity`, `stop_bits`, `dtr_on_open`, and
+`serial_timeout_ms` — mirror the CLI flags below so you can keep everything at
+9600 8N1 or match whatever framing your sender expects (e.g., asserting DTR for
+modems or honoring XON/XOFF).
 
 Reload config without restarting the daemon:
 
@@ -225,6 +235,11 @@ Reload config without restarting the daemon:
 | ---- | ------- | ---------------- |
 | `--device <path>` | Serial device to read newline-delimited JSON from. | `/dev/ttyUSB0` @ 9600 8N1. Override to `/dev/ttyAMA0`, `/dev/ttyS*`, or USB adapters as needed. |
 | `--baud <number>` | Serial baud rate. | `9600` |
+| `--flow-control <none\|software\|hardware>` | Override whether RTS/CTS or XON/XOFF is asserted on the UART. | `none` |
+| `--parity <none\|odd\|even>` | Choose parity framing when the remote expects it. | `none` |
+| `--stop-bits <1\|2>` | Select one or two stop bits. | `1` |
+| `--dtr-on-open <auto\|on\|off>` | Force the DTR line high/low on connect or leave the driver default. | `auto` (preserve driver behavior) |
+| `--serial-timeout-ms <number>` | Millisecond timeout for serial reads before reconnect logic kicks in. | `500` ms |
 | `--cols <number>` | LCD columns. | `20` |
 | `--rows <number>` | LCD rows. | `4` |
 | `--payload-file <path>` | Load a local JSON payload and render it once (no serial input). | Disabled by default—handy for CI smoke tests. |

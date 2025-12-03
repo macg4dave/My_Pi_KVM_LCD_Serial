@@ -1,10 +1,12 @@
 use crate::{
-    cli::{RunOptions, RunMode},
+    cli::{RunMode, RunOptions},
     config::Pcf8574Addr,
-    config::{Config, DEFAULT_BAUD, DEFAULT_COLS, DEFAULT_DEVICE, DEFAULT_ROWS},
+    config::{
+        Config, DEFAULT_BAUD, DEFAULT_COLS, DEFAULT_DEVICE, DEFAULT_ROWS, DEFAULT_SERIAL_TIMEOUT_MS,
+    },
     lcd::Lcd,
     payload::{Defaults as PayloadDefaults, RenderFrame},
-    serial::SerialPort,
+    serial::{DtrBehavior, FlowControlMode, ParityMode, SerialOptions, SerialPort, StopBitsMode},
     Result,
 };
 use std::{fs, str::FromStr, time::Instant};
@@ -40,6 +42,11 @@ use crate::milestones::serialsh::shell::ShellContext;
 pub struct AppConfig {
     pub device: String,
     pub baud: u32,
+    pub flow_control: FlowControlMode,
+    pub parity: ParityMode,
+    pub stop_bits: StopBitsMode,
+    pub dtr_on_open: DtrBehavior,
+    pub serial_timeout_ms: u64,
     pub cols: u8,
     pub rows: u8,
     pub scroll_speed_ms: u64,
@@ -61,6 +68,11 @@ impl Default for AppConfig {
         Self {
             device: DEFAULT_DEVICE.to_string(),
             baud: DEFAULT_BAUD,
+            flow_control: FlowControlMode::default(),
+            parity: ParityMode::default(),
+            stop_bits: StopBitsMode::default(),
+            dtr_on_open: DtrBehavior::default(),
+            serial_timeout_ms: DEFAULT_SERIAL_TIMEOUT_MS,
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
             scroll_speed_ms: crate::payload::DEFAULT_SCROLL_MS,
@@ -134,7 +146,7 @@ impl App {
         }
 
         let serial_connection: Option<SerialPort> =
-            attempt_serial_connect(&self.logger, &config.device, config.baud);
+            attempt_serial_connect(&self.logger, &config.device, config.serial_options());
         if serial_connection.is_none() {
             let now = Instant::now();
             backoff.mark_failure(now);
@@ -156,6 +168,11 @@ impl AppConfig {
         Self {
             device: opts.device.unwrap_or_else(|| config.device.clone()),
             baud: opts.baud.unwrap_or(config.baud),
+            flow_control: opts.flow_control.unwrap_or(config.flow_control),
+            parity: opts.parity.unwrap_or(config.parity),
+            stop_bits: opts.stop_bits.unwrap_or(config.stop_bits),
+            dtr_on_open: opts.dtr_on_open.unwrap_or(config.dtr_on_open),
+            serial_timeout_ms: opts.serial_timeout_ms.unwrap_or(config.serial_timeout_ms),
             cols: opts.cols.unwrap_or(config.cols),
             rows: opts.rows.unwrap_or(config.rows),
             scroll_speed_ms: config.scroll_speed_ms,
@@ -176,6 +193,17 @@ impl AppConfig {
             demo: opts.demo,
             command_allowlist: config.command_allowlist.clone(),
             serialsh: matches!(opts.mode, RunMode::SerialShell),
+        }
+    }
+
+    pub fn serial_options(&self) -> SerialOptions {
+        SerialOptions {
+            baud: self.baud,
+            timeout_ms: self.serial_timeout_ms,
+            flow_control: self.flow_control,
+            parity: self.parity,
+            stop_bits: self.stop_bits,
+            dtr: self.dtr_on_open,
         }
     }
 }
@@ -207,20 +235,12 @@ mod tests {
     #[test]
     fn config_from_options() {
         let home = set_temp_home();
-        let opts = RunOptions {
-            mode: RunMode::Daemon,
-            device: Some("/dev/ttyUSB1".into()),
-            baud: Some(57_600),
-            cols: Some(16),
-            rows: Some(2),
-            payload_file: None,
-            backoff_initial_ms: None,
-            backoff_max_ms: None,
-            pcf8574_addr: None,
-            log_level: None,
-            log_file: None,
-            demo: false,
-        };
+        let mut opts = RunOptions::default();
+        opts.mode = RunMode::Daemon;
+        opts.device = Some("/dev/ttyUSB1".into());
+        opts.baud = Some(57_600);
+        opts.cols = Some(16);
+        opts.rows = Some(2);
         let cfg = AppConfig::from_sources(Config::default(), opts.clone());
         assert_eq!(cfg.device, "/dev/ttyUSB1");
         assert_eq!(cfg.baud, 57_600);
@@ -238,6 +258,11 @@ mod tests {
         let cfg_file = Config {
             device: "/dev/ttyS0".into(),
             baud: 9_600,
+            flow_control: FlowControlMode::default(),
+            parity: ParityMode::default(),
+            stop_bits: StopBitsMode::default(),
+            dtr_on_open: DtrBehavior::default(),
+            serial_timeout_ms: DEFAULT_SERIAL_TIMEOUT_MS,
             cols: 16,
             rows: 2,
             scroll_speed_ms: crate::config::DEFAULT_SCROLL_MS,
@@ -283,7 +308,10 @@ mod tests {
         let app = App::from_options(opts).expect("app construction failed");
         // This should return Ok because the App.run() early-shortcircuits into
         // the preview ShellContext which is a no-op that returns Ok.
-        assert!(app.run().is_ok(), "app.run() should succeed in serialsh-preview mode");
+        assert!(
+            app.run().is_ok(),
+            "app.run() should succeed in serialsh-preview mode"
+        );
         let _ = std::fs::remove_dir_all(home);
     }
 }

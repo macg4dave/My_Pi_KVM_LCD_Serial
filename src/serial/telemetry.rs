@@ -66,7 +66,10 @@ fn get_file() -> io::Result<&'static Mutex<std::fs::File>> {
     }
 
     let result_ref = FILE_HANDLE.get().ok_or_else(|| {
-        io::Error::new(ErrorKind::Other, "failed to initialize serial telemetry log handle")
+        io::Error::new(
+            ErrorKind::Other,
+            "failed to initialize serial telemetry log handle",
+        )
     })?;
 
     match result_ref {
