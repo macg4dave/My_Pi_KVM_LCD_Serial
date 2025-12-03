@@ -30,9 +30,9 @@ fn render_frame(lcd: &mut Lcd, frame: &RenderFrame) {
 #[test]
 fn fake_serial_drives_frames_and_errors() {
     let mut serial = FakeSerialPort::new(vec![
-        Ok(r#"{"line1":"HELLO","line2":"WORLD"}"#.into()),
-        Ok(r#"{"line1":"HELLO","line2":"WORLD"}"#.into()), // duplicate ignored
-        Ok(r#"{"line1":"NEXT","line2":"PAGE","blink":true,"backlight":false}"#.into()),
+        Ok(r#"{"schema_version":1,"line1":"HELLO","line2":"WORLD"}"#.into()),
+        Ok(r#"{"schema_version":1,"line1":"HELLO","line2":"WORLD"}"#.into()), // duplicate ignored
+        Ok(r#"{"schema_version":1,"line1":"NEXT","line2":"PAGE","blink":true,"backlight":false}"#.into()),
         Ok("not json".into()), // parse error
         Err(Error::Io(std::io::Error::new(
             std::io::ErrorKind::TimedOut,

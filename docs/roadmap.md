@@ -40,16 +40,15 @@ There is also a short frameworks document that describes the set of skeleton mod
 | **P9** | **Server/client auto-negotiation**: implement handshake state in `src/app/connection.rs`, ensuring deterministic fallback to current behaviour when remote does not understand negotiation packets. |
 | **P10** | **Remote file push/pull transport**: extend payload schema for chunk IDs, checksums, resume markers; add tests covering corruption detection. Respect RAM-only buffering. |
 | **P11** | **Live hardware polling agent**: modular polling routines (CPU %, temps, disk) gated via config, pushing frames through existing render loop without blocking serial ingestion. |
-| **P12** | **LCD/display output mode**: add `display_mode = "panel"` payload option to mirror state onto auxiliary LCD/LED expansions while keeping HD44780 output primary. |
 | **P13** | **JSON-protocol strict mode**: introduce schema validation (Serde enums, length caps) and optional `"schema_version"` header to reject malformed inputs gracefully. |
 | **P14** | **Payload compression support**: evaluate LZ4 vs zstd (pure Rust crates allowed?) for UART throughput; ensure streaming decompression fits <5 MB RSS. |
 | **P15** | **Heartbeat + watchdog**: implement mutual heartbeat packets and fail-safe hooks to re-run LCD “offline” screen or trigger local script (within charter: no extra daemons). |
-| **P16** | **CLI tunneling UX polish**: history, prompt, exit codes surfaced nicely in `--test-serial` mode without breaking automation. |
+| **P13 (✅ 3 Dec 2025)** | **JSON-protocol strict mode**: introduce schema validation (Serde enums, length caps) and a required "schema_version" header to reject malformed inputs gracefully. |
 | **P17** | **Remote file integrity tooling**: CLI helper to verify checksums and list staged chunks in `/run/serial_lcd_cache`. |
-| **P18** | **Config-driven polling profiles**: allow `profiles` table in `config.toml` to customize polling intervals per metric, validated via tests. |
 | **P19** | **Documentation + sample payload refresh**: update `README.md`, `samples/payload_examples*.json`, and `docs/lcd_patterns.md` showing new modes and tunnels. |
 | **P20 (⚙️ in progress — 4 Dec 2025)** | **Serial transport resilience**: finalize explicit 8N1 + flow-control defaults in code, expose DTR/RTS toggles + timeout knobs via config for upcoming tunnels, and add structured error mapping/logs so reconnect logic can distinguish permission, unplug, and framing failures before Milestones A–C. _(Update: CLI + config now surface flow-control, parity, stop-bits, DTR, and timeout knobs; next up is richer error mapping/logging.)_ |
 | **P21** | **Adopt hd44780-driver crate for Linux builds where possible**: migrate the internal HD44780 driver to use the external `hd44780-driver` crate (via a small adapter for the platform I²C bus) while preserving our public API for any missing functionality. |
+| **P22** | **Custom character support and built in icons**: Add full HD44780 custom-character handling, including a built-in icon set and an API to load/swap glyph banks at runtime.
 
 ## Crate guidance for roadmap alignment
 

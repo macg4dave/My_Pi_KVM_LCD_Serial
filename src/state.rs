@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn dedupes_identical_frames() {
         let mut state = RenderState::new(None);
-        let raw = r#"{"line1":"A","line2":"B"}"#;
+        let raw = r#"{"schema_version":1,"line1":"A","line2":"B"}"#;
         let first = state.ingest(raw).unwrap();
         assert!(first.is_some());
         let second = state.ingest(raw).unwrap();
@@ -131,8 +131,12 @@ mod tests {
     #[test]
     fn rotates_pages() {
         let mut state = RenderState::new(None);
-        state.ingest(r#"{"line1":"A","line2":"B"}"#).unwrap();
-        state.ingest(r#"{"line1":"C","line2":"D"}"#).unwrap();
+        state
+            .ingest(r#"{"schema_version":1,"line1":"A","line2":"B"}"#)
+            .unwrap();
+        state
+            .ingest(r#"{"schema_version":1,"line1":"C","line2":"D"}"#)
+            .unwrap();
         let first = state.next_page().unwrap();
         assert_eq!(first.line1, "A");
         let second = state.next_page().unwrap();
@@ -145,7 +149,7 @@ mod tests {
     fn rejects_oversize_frame() {
         let mut state = RenderState::new(None);
         let long = format!(
-            r#"{{"line1":"{}","line2":""}}"#,
+            r#"{{"schema_version":1,"line1":"{}","line2":""}}"#,
             "x".repeat(MAX_FRAME_BYTES)
         );
         let err = state.ingest(&long).unwrap_err();
@@ -156,7 +160,7 @@ mod tests {
     fn expires_frame_after_ttl() {
         let mut state = RenderState::new(None);
         state
-            .ingest(r#"{"line1":"A","line2":"B","duration_ms":1}"#)
+            .ingest(r#"{"schema_version":1,"line1":"A","line2":"B","duration_ms":1}"#)
             .unwrap();
         assert_eq!(state.len(), 1);
         std::thread::sleep(std::time::Duration::from_millis(5));

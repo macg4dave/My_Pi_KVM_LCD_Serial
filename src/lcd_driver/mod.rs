@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use crate::{Error, Result};
 
-pub mod pcf8574;
 pub mod external;
+pub mod pcf8574;
 
 /// Backlight state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

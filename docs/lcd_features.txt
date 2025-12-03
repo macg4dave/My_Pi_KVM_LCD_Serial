@@ -12,7 +12,7 @@ LCD Output Features (how the screen will look)
   - Backlight blink.
   - Line 1 prefixed with "ALERT:" or short message (e.g., "ALERT: Temp").
   - Line 2 shows detail (e.g., "85C").
-  - TTL can keep alerts visible for a limited time.
+  - `duration_ms` can keep alerts visible for a limited time (in milliseconds).
 
 - Scrolling text:
   - Any line longer than the display auto-scrolls (marquee) at a default speed; `scroll_speed_ms` can slow/speed it.

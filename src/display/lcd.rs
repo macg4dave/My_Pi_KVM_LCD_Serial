@@ -1,4 +1,7 @@
-use crate::{config::{DisplayDriver, Pcf8574Addr}, Error, Result};
+use crate::{
+    config::{DisplayDriver, Pcf8574Addr},
+    Error, Result,
+};
 
 #[cfg(target_os = "linux")]
 use crate::lcd_driver::{self, external::ExternalHd44780, pcf8574::RppalBus};
@@ -197,7 +200,9 @@ impl Lcd {
 }
 
 #[cfg(target_os = "linux")]
-fn load_bar_glyphs_internal<B: lcd_driver::I2cBus>(driver: &mut lcd_driver::Hd44780<B>) -> Result<()> {
+fn load_bar_glyphs_internal<B: lcd_driver::I2cBus>(
+    driver: &mut lcd_driver::Hd44780<B>,
+) -> Result<()> {
     driver.load_custom_bitmaps(&BAR_GLYPHS)
 }
 
@@ -214,13 +219,7 @@ enum DriverBackend {
 
 #[cfg(target_os = "linux")]
 impl DriverBackend {
-    fn new(
-        bus: RppalBus,
-        addr: u8,
-        cols: u8,
-        rows: u8,
-        preference: DisplayDriver,
-    ) -> Result<Self> {
+    fn new(bus: RppalBus, addr: u8, cols: u8, rows: u8, preference: DisplayDriver) -> Result<Self> {
         match preference {
             DisplayDriver::Hd44780Driver => {
                 let raw = bus.into_inner();

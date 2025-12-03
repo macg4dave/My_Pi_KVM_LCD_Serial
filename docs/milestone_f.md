@@ -13,7 +13,7 @@ Ship a strict, versioned JSON protocol for every serial payload plus an optional
 
 ### Success criteria
 
-- Frames include a `schema_version` and type discriminator; legacy payloads without the field still parse via compatibility paths.
+-- Frames include a `schema_version` and type discriminator; the parser now requires `schema_version` and rejects frames that do not include it.
 - The parser enforces length and enum bounds (bars, icons, file chunk sizes, metrics arrays) and returns structured `Error::Parse` variants when validation fails.
 - Optional compression envelopes (initially `codec = "lz4"`) encapsulate inner JSON payloads without exceeding a 1 MB post-decompression limit; malformed envelopes log to `/run/serial_lcd_cache/protocol_errors.log` and do not crash the daemon.
 - CLI + config switches allow operators to request compression; when remote peers lack the capability the runtime auto-falls back to plain JSON and emits a warning.
@@ -36,7 +36,7 @@ Milestone F keeps the current framing (newline-delimited JSON) but wraps it in 
 **Files:** `src/payload/parser.rs`, `src/payload/mod.rs`, new `src/payload/schema.rs` (if needed), `docs/architecture.md`, `docs/roadmap.md` (status annotations), `samples/*.json`.
 
 - Define a `ProtocolFrame` enum with variants for display frames (current `RenderFrame`), file chunk manifests (P10), control messages, and the new compression envelope. Embed a `schema_version: u8` and `frame_type` string in the serialized form.
-- Teach `RenderFrame::from_payload_json_with_defaults` to detect missing `schema_version` and treat it as `0` (legacy). Version `1` enforces new rules: `line1/line2` length caps, icon counts ≤ 4, bar labels bounded to display width, etc.
+-- Teach `RenderFrame::from_payload_json_with_defaults` to require `schema_version` and enforce version `1` rules: `line1/line2` length caps, icon counts ≤ 4, bar labels bounded to display width, etc.
 - Introduce manual bounds helpers (max string length, array len, numeric ranges). Violations map to `Error::Parse(String)` with concise wording so CLI logs remain readable.
 - Update `samples/payload_examples.json` and `docs/lcd_patterns.md` with schema-versioned fixtures to help operators craft valid frames.
 - Extend unit tests in `src/payload/parser.rs` to cover version parsing, default fallback, bounds enforcement, and checksum validation with the new canonical serialization (checksum excludes the compression envelope when present).
@@ -88,7 +88,7 @@ Milestone F keeps the current framing (newline-delimited JSON) but wraps it in 
 
 ## Acceptance checklist
 
-1. Parser accepts legacy payloads (no `schema_version`) and emits versioned frames when the field is present.
+1. Parser requires `schema_version` and emits versioned frames when the field is present.
 2. Compression envelopes round-trip through the daemon when LZ4 is enabled; attempting to send compressed frames to a non-compression peer logs an error and drops the frame without crashing.
 3. Decompression buffers are capped at 1 MB and live exclusively inside `/run/serial_lcd_cache` when heap allocations are required.
 4. CLI/config toggles exist, default to uncompressed mode, and surface clear errors for unsupported codecs or schema versions.
@@ -97,8 +97,8 @@ Milestone F keeps the current framing (newline-delimited JSON) but wraps it in 
 ## Sample frames
 
 ```json
-// Legacy display payload (treated as schema_version 0)
-{"line1":"HELLO","line2":"WORLD","icons":["battery"]}
+// Schema v1 display payload
+{"schema_version":1,"line1":"HELLO","line2":"WORLD","icons":["battery"]}
 
 // Compressed LZ4 envelope carrying a schema v1 display payload
 {

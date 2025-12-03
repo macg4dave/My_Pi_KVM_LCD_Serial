@@ -121,36 +121,47 @@ Note for builders: the included `Makefile` and `scripts/local-release.sh` will p
 
 LifelineTTY listens for **one JSON object per line** over a serial port.
 
+### Schema versioning and strict mode
+
+You must include a `schema_version` field to enable strict validation rules (for future-proofing and compatibility): missing `schema_version` will cause the payload to be rejected.
+
+### Migration note
+
+Starting with this release, every JSON payload must include `schema_version`. If you have automation or scripts that previously sent bare objects, add `"schema_version":1` to your payloads. Example:
+
+```json
+{"schema_version":1,"line1":"Hello","line2":"World"}
+```
 Examples:
 
 ### Simple text
 
 ```json
-{"line1":"Hello","line2":"World"}
+{"schema_version":1,"line1":"Hello","line2":"World"}
 ```
 
 ### Dashboard
 
 ```json
-{"mode":"dashboard","line1":"CPU 42%","line2":"RAM 73%","bar":73}
+{"schema_version":1,"mode":"dashboard","line1":"CPU 42%","line2":"RAM 73%","bar":73}
 ```
 
 ### Banner marquee
 
 ```json
-{"mode":"banner","line1":"Scrolling across the LCD..."}
+{"schema_version":1,"mode":"banner","line1":"Scrolling across the LCD..."}
 ```
 
 ### Alert with blinking backlight
 
 ```json
-{"line1":"TEMP ALERT","line2":"85C","blink":true}
+{"schema_version":1,"line1":"TEMP ALERT","line2":"85C","blink":true}
 ```
 
 ### Turn backlight off
 
 ```json
-{"line1":"Lights out","line2":"","backlight":false}
+{"schema_version":1,"line1":"Lights out","line2":"","backlight":false}
 ```
 
 **Everything** the display can do is driven by JSON.
@@ -208,7 +219,7 @@ modems or honoring XON/XOFF).
 Reload config without restarting the daemon:
 
 ```json
-{"config_reload":true}
+{"schema_version":1,"config_reload":true}
 ```
 
 ---

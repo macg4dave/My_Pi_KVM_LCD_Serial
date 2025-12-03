@@ -38,6 +38,7 @@ Milestone E keeps this flow but lets the render loop fan out frames to addition
 
   ```json
   {
+  "schema_version":1,
     "mode": "panel",
     "panels": [
       {"id": "primary", "line1": "OPS", "line2": "Nominal"},
@@ -47,10 +48,10 @@ Milestone E keeps this flow but lets the render loop fan out frames to addition
   ```
 
   - Each entry inherits defaults from the root payload unless overridden (bar, blink, scroll, etc.).
-  - Missing `panels` → treat the root payload as the single panel (backward compatibility).
+  - Missing `panels` → treat the root payload as the single panel.
 - Update `RenderFrame` to include `Vec<PanelFrame>` plus helper methods so the render loop can ask “does this frame carry per-panel overrides?” without re-parsing JSON.
 - Add parser tests that prove:
-  - Legacy single-panel payloads still succeed.
+  - Single-panel payloads (with `schema_version`) still succeed.
   - `display_mode = "panel"` rejects malformed panel arrays with actionable errors.
   - Checksums cover the canonical payload including the new `panels` field.
 
@@ -107,7 +108,7 @@ Milestone E keeps this flow but lets the render loop fan out frames to addition
 
 ## Acceptance checklist
 
-1. Parser understands `display_mode = "panel"` and `panels[]` without regressing legacy payloads (unit tests in `payload::parser` prove it).
+1. Parser understands `display_mode = "panel"` and `panels[]` and respects `schema_version` requirements (unit tests in `payload::parser` prove it).
 2. Multiple `Lcd` devices can be created from config; failures surface as warnings but do not crash the daemon.
 3. Render loop updates each active panel at the cadence dictated by the frame while keeping the serial ingest/backoff behavior unchanged (profiling on Pi 1 stays under 5 MB RSS and no busy loops are introduced).
 4. Auxiliary panels fall back to a safe template (e.g., “PANEL offline”) or mirror primary output when a payload references an unknown `panel_id`.
@@ -117,27 +118,19 @@ Milestone E keeps this flow but lets the render loop fan out frames to addition
 
 ```json
 // Mirror both panels with the same payload (default when mode="panel" and no panels[] overrides)
-{"line1":"OPS NOMINAL","line2":"UTC 22:15","mode":"panel"}
+{"schema_version":1,"line1":"OPS NOMINAL","line2":"UTC 22:15","mode":"panel"}
 
 // Split content between primary + diagnostics
 {
+  "schema_version":1,
   "line1":"OPS STAT",
   "line2":"All green",
   "mode":"panel",
   "panels": [
-    {"id":"primary","line1":"OPS STAT","line2":"All green"},
-    {"id":"diagnostics","line1":"Temp 42C","line2":"Vbat 4.9V","scroll":false}
+    {"id": "primary", "line1": "OPS STAT", "line2": "All green"},
+    {"id": "diagnostics", "line1": "Temp:42C", "line2": "Vbat 4.9V"}
   ]
 }
-```
-
-## Test & rollout plan
-
-- Unit tests: `cargo test payload::parser overlays::tests state::tests` (x86_64) with the new panel cases un-ignored.
-- Integration tests: extend `tests/integration_mock.rs::renders_payload_frames` (or add `tests/display_panels.rs`) to assert both panels receive updates using the stub `Lcd` backend.
-- Hardware smoke: run `lifelinetty --test-lcd --cols <cols> --rows <rows>` on Pi 1 with two PCF8574 backpacks connected at addresses 0x27 and 0x26. Capture logs proving graceful degradation when the auxiliary bus is unplugged mid-run.
-- Release notes: mention the new config format and advise users to regenerate `~/.serial_lcd/config.toml` if they want to define auxiliary panels.
-
 ## Allowed crates & dependencies
 
 The display expansion sticks to the same approved crates: `std`, `serde`, `serde_json`, `crc32fast`, `hd44780-driver`, `serialport`, optional `tokio`/`tokio-serial` via the existing feature flag, `rppal`, `linux-embedded-hal`, and `ctrlc`. Multi-panel support reuses the current LCD driver abstractions without pulling in GUI/layout libraries or additional HAL crates.

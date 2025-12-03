@@ -10,7 +10,7 @@ fn integration_parses_and_states() {
         scroll_speed_ms: DEFAULT_SCROLL_MS,
         page_timeout_ms: DEFAULT_PAGE_TIMEOUT_MS,
     }));
-    let raw = r#"{"line1":"CPU","line2":"42%","bar":42,"scroll":false}"#;
+    let raw = r#"{"schema_version":1,"line1":"CPU","line2":"42%","bar":42,"scroll":false}"#;
     let frame = state.ingest(raw).unwrap().unwrap();
     assert_eq!(frame.bar_percent, Some(42));
     assert!(!frame.scroll_enabled);

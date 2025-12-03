@@ -158,10 +158,7 @@ pub fn parse(raw: &str) -> Result<Config> {
             }
             "display_driver" => {
                 cfg.display_driver = value.parse().map_err(|e: String| {
-                    Error::InvalidArgs(format!(
-                        "invalid display_driver on line {}: {e}",
-                        idx + 1
-                    ))
+                    Error::InvalidArgs(format!("invalid display_driver on line {}: {e}", idx + 1))
                 })?;
             }
             "backoff_initial_ms" => {
