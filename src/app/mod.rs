@@ -60,6 +60,7 @@ pub struct AppConfig {
     pub negotiation: NegotiationConfig,
     pub pcf8574_addr: Pcf8574Addr,
     pub display_driver: DisplayDriver,
+    pub lcd_present: bool,
     pub log_level: LogLevel,
     pub log_file: Option<String>,
     pub demo: bool,
@@ -93,6 +94,7 @@ impl Default for AppConfig {
             negotiation: NegotiationConfig::default(),
             pcf8574_addr: crate::config::DEFAULT_PCF8574_ADDR,
             display_driver: crate::config::DEFAULT_DISPLAY_DRIVER,
+            lcd_present: crate::config::DEFAULT_LCD_PRESENT,
             log_level: LogLevel::default(),
             log_file: None,
             demo: false,
@@ -128,12 +130,16 @@ impl App {
     pub fn run(&self) -> Result<()> {
         let mut config = self.config.clone();
 
-        let mut lcd = Lcd::new(
-            config.cols,
-            config.rows,
-            config.pcf8574_addr.clone(),
-            config.display_driver,
-        )?;
+        let mut lcd = if config.lcd_present {
+            Lcd::new(
+                config.cols,
+                config.rows,
+                config.pcf8574_addr.clone(),
+                config.display_driver,
+            )?
+        } else {
+            Lcd::new_stub(config.cols, config.rows)
+        };
         lcd.render_boot_message()?;
         self.logger.info(format!(
             "daemon start (device={}, baud={}, cols={}, rows={})",
@@ -218,6 +224,7 @@ impl AppConfig {
                 .pcf8574_addr
                 .unwrap_or_else(|| config.pcf8574_addr.clone()),
             display_driver: config.display_driver,
+            lcd_present: config.lcd_present,
             log_level: opts
                 .log_level
                 .as_deref()
@@ -316,8 +323,10 @@ mod tests {
             backoff_max_ms: crate::config::DEFAULT_BACKOFF_MAX_MS,
             pcf8574_addr: crate::config::DEFAULT_PCF8574_ADDR,
             display_driver: crate::config::DEFAULT_DISPLAY_DRIVER,
+            lcd_present: crate::config::DEFAULT_LCD_PRESENT,
             command_allowlist: Vec::new(),
             protocol: crate::config::ProtocolConfig::default(),
+            watchdog: crate::config::WatchdogConfig::default(),
         };
         let opts = RunOptions::default();
         let merged = AppConfig::from_sources(cfg_file.clone(), opts);

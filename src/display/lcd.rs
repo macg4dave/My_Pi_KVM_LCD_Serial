@@ -51,6 +51,63 @@ const BAR_GLYPHS: [[&str; 8]; 8] = [
 ];
 
 #[cfg(target_os = "linux")]
+const PCF8574_ADDR_CANDIDATES: [u8; 8] = [0x27, 0x26, 0x25, 0x24, 0x23, 0x22, 0x21, 0x20];
+
+#[cfg(target_os = "linux")]
+const I2CDEV_PATHS: [&str; 2] = ["/dev/i2c-1", "/dev/i2c-0"];
+
+struct StubState {
+    last_lines: (String, String),
+    backlight_on: bool,
+    blink_on: bool,
+    clears: usize,
+    custom_chars: [[u8; 8]; 8],
+}
+
+impl StubState {
+    fn new() -> Self {
+        Self {
+            last_lines: (String::new(), String::new()),
+            backlight_on: true,
+            blink_on: false,
+            clears: 0,
+            custom_chars: [[0u8; 8]; 8],
+        }
+    }
+
+    fn clear(&mut self) -> Result<()> {
+        self.clears = self.clears.saturating_add(1);
+        self.last_lines = (String::new(), String::new());
+        Ok(())
+    }
+
+    fn set_backlight(&mut self, on: bool) -> Result<()> {
+        self.backlight_on = on;
+        Ok(())
+    }
+
+    fn set_blink(&mut self, on: bool) -> Result<()> {
+        self.blink_on = on;
+        Ok(())
+    }
+
+    fn write_line(&mut self, row: u8, line: &str) -> Result<()> {
+        match row {
+            0 => self.last_lines.0 = line.to_string(),
+            1 => self.last_lines.1 = line.to_string(),
+            _ => (),
+        }
+        Ok(())
+    }
+
+    fn custom_char(&mut self, slot: u8, bitmap: &[u8; 8]) -> Result<()> {
+        let idx = (slot as usize).min(self.custom_chars.len().saturating_sub(1));
+        self.custom_chars[idx] = *bitmap;
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
 pub enum LcdBus {
     Rppal(RppalI2c),
     I2cdev(I2cdev),
@@ -61,21 +118,22 @@ pub enum LcdBus {
 pub struct Lcd {
     cols: u8,
     rows: u8,
+    stub: StubState,
     #[cfg(target_os = "linux")]
-    driver: DriverBackend,
-    #[cfg(not(target_os = "linux"))]
-    last_lines: (String, String),
-    #[cfg(not(target_os = "linux"))]
-    backlight_on: bool,
-    #[cfg(not(target_os = "linux"))]
-    blink_on: bool,
-    #[cfg(not(target_os = "linux"))]
-    clears: usize,
-    #[cfg(not(target_os = "linux"))]
-    custom_chars: [[u8; 8]; 8],
+    driver: Option<DriverBackend>,
 }
 
 impl Lcd {
+    pub fn new_stub(cols: u8, rows: u8) -> Self {
+        Self {
+            cols,
+            rows,
+            stub: StubState::new(),
+            #[cfg(target_os = "linux")]
+            driver: None,
+        }
+    }
+
     pub fn new(
         cols: u8,
         rows: u8,
@@ -84,10 +142,28 @@ impl Lcd {
     ) -> Result<Self> {
         #[cfg(target_os = "linux")]
         {
-            let (mut driver, addr) = DriverBackend::new(cols, rows, pcf_addr, display_driver)?;
-            eprintln!("pcf8574 addr: 0x{addr:02x}");
-            driver.load_bar_glyphs()?;
-            Ok(Self { cols, rows, driver })
+            let stub = StubState::new();
+            match DriverBackend::new(cols, rows, pcf_addr, display_driver) {
+                Ok((mut driver, addr)) => {
+                    eprintln!("pcf8574 addr: 0x{addr:02x}");
+                    driver.load_bar_glyphs()?;
+                    Ok(Self {
+                        cols,
+                        rows,
+                        stub,
+                        driver: Some(driver),
+                    })
+                }
+                Err(err) => {
+                    eprintln!("warning: lcd init failed ({err}); falling back to stub display");
+                    Ok(Self {
+                        cols,
+                        rows,
+                        stub,
+                        driver: None,
+                    })
+                }
+            }
         }
 
         #[cfg(not(target_os = "linux"))]
@@ -96,11 +172,7 @@ impl Lcd {
             Ok(Self {
                 cols,
                 rows,
-                last_lines: (String::new(), String::new()),
-                backlight_on: true,
-                blink_on: false,
-                clears: 0,
-                custom_chars: [[0u8; 8]; 8],
+                stub: StubState::new(),
             })
         }
     }
@@ -113,38 +185,31 @@ impl Lcd {
     pub fn clear(&mut self) -> Result<()> {
         #[cfg(target_os = "linux")]
         {
-            self.driver.clear()
+            if let Some(driver) = &mut self.driver {
+                return driver.clear();
+            }
         }
-        #[cfg(not(target_os = "linux"))]
-        {
-            self.clears += 1;
-            self.last_lines = (String::new(), String::new());
-            Ok(())
-        }
+        self.stub.clear()
     }
 
     pub fn set_backlight(&mut self, on: bool) -> Result<()> {
         #[cfg(target_os = "linux")]
         {
-            self.driver.set_backlight(on)
+            if let Some(driver) = &mut self.driver {
+                return driver.set_backlight(on);
+            }
         }
-        #[cfg(not(target_os = "linux"))]
-        {
-            self.backlight_on = on;
-            Ok(())
-        }
+        self.stub.set_backlight(on)
     }
 
     pub fn set_blink(&mut self, on: bool) -> Result<()> {
         #[cfg(target_os = "linux")]
         {
-            self.driver.set_blink(on)
+            if let Some(driver) = &mut self.driver {
+                return driver.set_blink(on);
+            }
         }
-        #[cfg(not(target_os = "linux"))]
-        {
-            self.blink_on = on;
-            Ok(())
-        }
+        self.stub.set_blink(on)
     }
 
     pub fn write_line(&mut self, row: u8, content: &str) -> Result<()> {
@@ -159,18 +224,11 @@ impl Lcd {
 
         #[cfg(target_os = "linux")]
         {
-            self.driver.write_line(row, &trimmed)
-        }
-
-        #[cfg(not(target_os = "linux"))]
-        {
-            if row == 0 {
-                self.last_lines.0 = trimmed;
-            } else if row == 1 {
-                self.last_lines.1 = trimmed;
+            if let Some(driver) = &mut self.driver {
+                return driver.write_line(row, &trimmed);
             }
-            Ok(())
         }
+        self.stub.write_line(row, &trimmed)
     }
 
     /// Convenience to write both lines back-to-back to reduce flicker.
@@ -182,15 +240,11 @@ impl Lcd {
     pub(crate) fn write_custom_char(&mut self, slot: u8, bitmap: &[u8; 8]) -> Result<()> {
         #[cfg(target_os = "linux")]
         {
-            self.driver.custom_char(slot, bitmap)
+            if let Some(driver) = &mut self.driver {
+                return driver.custom_char(slot, bitmap);
+            }
         }
-
-        #[cfg(not(target_os = "linux"))]
-        {
-            let idx = (slot as usize).min(self.custom_chars.len().saturating_sub(1));
-            self.custom_chars[idx] = *bitmap;
-            Ok(())
-        }
+        self.stub.custom_char(slot, bitmap)
     }
 
     pub fn cols(&self) -> u8 {
@@ -226,27 +280,28 @@ impl Lcd {
             )?,
         };
         driver.load_bar_glyphs()?;
-        Ok(Self { cols, rows, driver })
+        Ok(Self {
+            cols,
+            rows,
+            stub: StubState::new(),
+            driver: Some(driver),
+        })
     }
 
-    #[cfg(not(target_os = "linux"))]
     pub fn last_lines(&self) -> (String, String) {
-        self.last_lines.clone()
+        self.stub.last_lines.clone()
     }
 
-    #[cfg(not(target_os = "linux"))]
     pub fn last_backlight(&self) -> bool {
-        self.backlight_on
+        self.stub.backlight_on
     }
 
-    #[cfg(not(target_os = "linux"))]
     pub fn last_blink(&self) -> bool {
-        self.blink_on
+        self.stub.blink_on
     }
 
-    #[cfg(not(target_os = "linux"))]
     pub fn clear_count(&self) -> usize {
-        self.clears
+        self.stub.clears
     }
 }
 
@@ -361,17 +416,21 @@ impl DriverBackend {
         pcf_addr: Pcf8574Addr,
         preference: DisplayDriver,
     ) -> Result<(Self, u8)> {
-        let mut bus = RppalBus::new_default()?;
-        let addr = match pcf_addr {
-            Pcf8574Addr::Auto => RppalBus::detect_address(
-                &mut bus,
-                &[0x27, 0x26, 0x25, 0x24, 0x23, 0x22, 0x21, 0x20],
-                0x27,
-            ),
-            Pcf8574Addr::Addr(addr) => addr,
-        };
-        let backend = Self::from_rppal_bus(bus, addr, cols, rows, preference)?;
-        Ok((backend, addr))
+        match Self::new_with_rppal(cols, rows, pcf_addr.clone(), preference) {
+            Ok(tuple) => Ok(tuple),
+            Err(primary_err) => {
+                eprintln!(
+                    "warning: rppal I2C init failed ({primary_err}); trying linux-embedded-hal"
+                );
+                match Self::new_with_i2cdev(cols, rows, pcf_addr, preference) {
+                    Ok(tuple) => Ok(tuple),
+                    Err(fallback_err) => Err(Error::Io(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("lcd init failed: {primary_err}; fallback: {fallback_err}"),
+                    ))),
+                }
+            }
+        }
     }
 
     fn from_rppal_bus(
@@ -412,6 +471,48 @@ impl DriverBackend {
                 Ok(DriverBackend::Internal(internal))
             }
         }
+    }
+
+    fn new_with_rppal(
+        cols: u8,
+        rows: u8,
+        pcf_addr: Pcf8574Addr,
+        preference: DisplayDriver,
+    ) -> Result<(Self, u8)> {
+        let mut bus = RppalBus::new_default()?;
+        let addr = match pcf_addr {
+            Pcf8574Addr::Auto => bus.detect_address(&PCF8574_ADDR_CANDIDATES, 0x27),
+            Pcf8574Addr::Addr(addr) => addr,
+        };
+        let backend = Self::from_rppal_bus(bus, addr, cols, rows, preference)?;
+        Ok((backend, addr))
+    }
+
+    fn new_with_i2cdev(
+        cols: u8,
+        rows: u8,
+        pcf_addr: Pcf8574Addr,
+        preference: DisplayDriver,
+    ) -> Result<(Self, u8)> {
+        let mut bus = Self::open_i2cdev_bus()?;
+        let addr = match pcf_addr {
+            Pcf8574Addr::Auto => bus.detect_address(&PCF8574_ADDR_CANDIDATES, 0x27),
+            Pcf8574Addr::Addr(addr) => addr,
+        };
+        let backend = Self::from_i2cdev_bus(bus, addr, cols, rows, preference)?;
+        Ok((backend, addr))
+    }
+
+    fn open_i2cdev_bus() -> Result<I2cdevBus> {
+        let mut last_error: Option<Error> = None;
+        for path in I2CDEV_PATHS {
+            match I2cdevBus::from_path(path) {
+                Ok(bus) => return Ok(bus),
+                Err(err) => last_error = Some(err),
+            }
+        }
+        Err(last_error
+            .unwrap_or_else(|| Error::InvalidArgs("no accessible i2c-dev bus found".into())))
     }
 
     fn clear(&mut self) -> Result<()> {

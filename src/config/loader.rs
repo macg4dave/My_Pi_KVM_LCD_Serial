@@ -56,6 +56,7 @@ dtr_on_open = \"{}\"\n\
 serial_timeout_ms = {}\n\
 cols = {}\n\
 rows = {}\n\
+lcd_present = {}\n\
 scroll_speed_ms = {}\n\
 page_timeout_ms = {}\n\
     polling_enabled = {}\n\
@@ -84,6 +85,7 @@ timeout_ms = {}\n",
         config.serial_timeout_ms,
         config.cols,
         config.rows,
+        config.lcd_present,
         config.scroll_speed_ms,
         config.page_timeout_ms,
         config.polling_enabled,
@@ -179,6 +181,11 @@ pub fn parse(raw: &str) -> Result<Config> {
             "rows" => {
                 cfg.rows = value.parse().map_err(|_| {
                     Error::InvalidArgs(format!("invalid rows value on line {}", idx + 1))
+                })?;
+            }
+            "lcd_present" => {
+                cfg.lcd_present = value.parse().map_err(|_| {
+                    Error::InvalidArgs(format!("invalid lcd_present on line {}", idx + 1))
                 })?;
             }
             "scroll_speed_ms" => {
@@ -561,6 +568,7 @@ mod tests {
             button_gpio_pin: Some(22),
             pcf8574_addr: Pcf8574Addr::Auto,
             display_driver: DisplayDriver::Hd44780Driver,
+            lcd_present: crate::config::DEFAULT_LCD_PRESENT,
             backoff_initial_ms: DEFAULT_BACKOFF_INITIAL_MS,
             backoff_max_ms: DEFAULT_BACKOFF_MAX_MS,
             negotiation: crate::config::NegotiationConfig::default(),

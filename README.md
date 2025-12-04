@@ -1,4 +1,4 @@
-# LifelineTTY — 
+# LifelineTTY —
 
 ---
 
@@ -91,7 +91,7 @@ LifelineTTY now ships with a curated HD44780 icon registry and a runtime CGRAM
 bank manager so you can request meaningful glyphs without hand-crafting custom
 bytes. Send an `icons` array in your payload and the render loop hot-swaps the
 needed bitmaps into the LCD before each render pass, falling back to ASCII when
-the request would exceed the hardware’s eight custom slots.
+the request would exceed the hardware’s custom slot budget.
 
 Current semantic icon names (case/spacing/hyphen normalizations are accepted)
 include:
@@ -103,14 +103,17 @@ down_arrow_right, down_arrow_left, return_arrow, hourglass, degree_symbol,
 degree_c, degree_f
 ```
 
-Each render can stage up to eight custom glyphs, and the bar graph + heartbeat
-overlays reserve part of that budget when they are active. When a frame asks
-for more icons than can fit, the extras fall back to their ASCII placeholder
-(`wifi` becomes `w`, `heart` becomes `h`, etc.) and the daemon emits a debug log
-so you can trim the payload. Unknown names are ignored entirely, so typos such
-as `"batery"` or `"icon"` simply omit the glyph rather than crashing the
-daemon. For the full catalog, attribution, and row-by-row data, see
-[`docs/icon_library.md`](docs/icon_library.md).
+Each payload can request up to **four** icons so the daemon keeps the eight-slot
+CGRAM bank free for bar/heartbeat overlays. When you send more than four names,
+the extras are dropped and the daemon falls back to the ASCII placeholder for
+each glyph (e.g., `wifi` becomes `w`, `heart` becomes `h`). Set
+`LIFELINETTY_LOG_LEVEL=debug` or `--log-level debug` to see icon saturation
+warnings in `/run/serial_lcd_cache` and trim the offending names if needed.
+Unknown names are ignored entirely, so typos such as `"batery"` simply omit
+that icon rather than crashing the daemon. For the full catalog,
+attribution, and row-by-row data, see [`docs/icon_library.md`](docs/icon_library.md);
+the `samples/payload_examples.json` file also includes a ready-made icon test
+frame you can adapt to validate new combinations.
 
 Strict mode (enabled by including `schema_version`) also rejects payloads that
 contain fields the current schema does not define. Keep keys tidy—typos like
@@ -166,6 +169,50 @@ Examples:
 ```json
 {"schema_version":1,"line1":"Lights out","line2":"","backlight":false}
 ```
+
+### Negotiation & command tunnel
+
+Before the first render frame reaches the LCD, LifelineTTY writes `INIT` and
+exchanges `hello` / `hello_ack` control frames. Peers advertise capability bits
+(tunnel, heartbeat, compression), the `Negotiator` compares `node_id` +
+`preference` (`prefer_server`, `prefer_client`, `no_preference`), and the two
+roles are elected deterministicly. All events are recorded in
+`/run/serial_lcd_cache/logs/negotiation.log` so you can audit why a node became a
+server or client, and the `[negotiation]` block in
+`~/.serial_lcd/config.toml` mirrors what the wizard stored for `node_id`,
+`preference`, and `timeout_ms`. The top-level `command_allowlist` array limits
+which programs the tunnel server is allowed to spawn, regardless of what the
+peer requested.
+
+When your daemon winds up as the command-server, every `command` frame carries a
+CRC32 and a `message` array that can be one of the `CommandMessage` variants
+(`Request`, `Chunk`, `Exit`, `Busy`, `Error`, `Heartbeat`, `Ack`). `Request`
+frames include a `scratch_path` that must live under `/run/serial_lcd_cache` and
+stay within 256 bytes so command output is always jailed in RAM. `Chunk` frames
+stream stdout/stderr, `Exit` reports the final code, and `Busy` alerts the client
+when the previous command is still running. The `--serialsh` shell (or any
+custom tunnel client) sends these frames, while the server replies using the same
+channel.
+
+Example command request frame:
+
+```json
+{
+  "channel": "command",
+  "schema_version": 1,
+  "message": {
+    "type": "request",
+    "request_id": 42,
+    "cmd": "tail -n 20 /run/serial_lcd_cache/polling/events.log",
+    "scratch_path": "/run/serial_lcd_cache/tunnel/request-42"
+  },
+  "crc32": 3864358418
+}
+```
+
+See `samples/payload_examples.json` for ready-made `hello`, `hello_ack`, and
+command-frame snippets, and peek at `samples/payload_examples.old.json` for the
+journal-style summary of a tunnel-aware dashboard.
 
 ### Compression envelopes (Milestone F / P14)
 
@@ -264,6 +311,13 @@ backoff_max_ms = 10000
 [protocol]
 schema_version = 1
 compression = { enabled = false, codec = "lz4" }
+
+[negotiation]
+node_id = 1
+preference = "no_preference"
+timeout_ms = 1000
+ 
+command_allowlist = []
 ```
 
 The `[protocol]` section locks the schema version (currently `1`) and lets you request
@@ -341,7 +395,8 @@ Reload config without restarting the daemon:
 
 - **Auto-run trigger**: the wizard starts before any run/test mode whenever `~/.serial_lcd/config.toml` is missing. It records the serial device, highest stable baud, LCD geometry, and negotiation role preference, then persists those answers and writes a short transcript to `/run/serial_lcd_cache/wizard/summary.log`.
 - **Manual reruns**: invoke `lifelinetty --wizard` or set `LIFELINETTY_FORCE_WIZARD=1` to re-run the interview even when a config already exists. This is helpful after hardware moves or when testing new baud profiles.
-- **Headless + CI support**: when stdin is not a TTY (systemd, CI), the wizard auto-accepts safe defaults so the daemon can boot unattended. Provide `LIFELINETTY_WIZARD_SCRIPT=/path/to/answers.txt` with newline-delimited responses to script the prompts during testing.
+- **Headless + CI support**: when stdin is not a TTY (systemd, CI), the wizard auto-accepts safe defaults so the daemon can boot unattended. Provide `LIFELINETTY_WIZARD_SCRIPT=/path/to/answers.txt` with newline-delimited responses to script the prompts during testing. The first line now answers the new LCD-presence question (`y`/`n`).
+- **LCD detection**: the wizard now asks up front whether an LCD is connected before touching the hardware; answering `n` saves a 2-row fallback configuration so the daemon keeps running without an attached display.
 - **LCD cues + logging**: prompts mirror onto the LCD (when available), and every outcome is appended to `/run/serial_lcd_cache/wizard/summary.log` for auditing alongside serial/log caches.
 
 ### Serial shell mode (Milestone G)

@@ -14,6 +14,7 @@ pub const DEFAULT_BAUD: u32 = 9_600;
 pub const MIN_BAUD: u32 = 9_600;
 pub const DEFAULT_COLS: u8 = 20;
 pub const DEFAULT_ROWS: u8 = 4;
+pub const DEFAULT_LCD_PRESENT: bool = true;
 pub const MIN_COLS: u8 = 8;
 pub const MAX_COLS: u8 = 40;
 pub const MIN_ROWS: u8 = 1;
@@ -169,6 +170,7 @@ pub struct Config {
     pub button_gpio_pin: Option<u8>,
     pub pcf8574_addr: Pcf8574Addr,
     pub display_driver: DisplayDriver,
+    pub lcd_present: bool,
     pub backoff_initial_ms: u64,
     pub backoff_max_ms: u64,
     pub negotiation: NegotiationConfig,
@@ -196,6 +198,7 @@ impl Default for Config {
             button_gpio_pin: None,
             pcf8574_addr: DEFAULT_PCF8574_ADDR,
             display_driver: DEFAULT_DISPLAY_DRIVER,
+            lcd_present: DEFAULT_LCD_PRESENT,
             backoff_initial_ms: DEFAULT_BACKOFF_INITIAL_MS,
             backoff_max_ms: DEFAULT_BACKOFF_MAX_MS,
             negotiation: NegotiationConfig::default(),
@@ -372,6 +375,7 @@ mod tests {
             baud = 9600
             cols = 16
             rows = 2
+            lcd_present = false
             scroll_speed_ms = 300
             page_timeout_ms = 4500
             polling_enabled = true
@@ -388,6 +392,7 @@ mod tests {
         assert_eq!(cfg.baud, 9600);
         assert_eq!(cfg.cols, 16);
         assert_eq!(cfg.rows, 2);
+        assert!(!cfg.lcd_present);
         assert_eq!(cfg.scroll_speed_ms, 300);
         assert_eq!(cfg.page_timeout_ms, 4500);
         assert!(cfg.polling_enabled);
@@ -434,6 +439,8 @@ mod tests {
             negotiation: NegotiationConfig::default(),
             command_allowlist: Vec::new(),
             protocol: ProtocolConfig::default(),
+            lcd_present: DEFAULT_LCD_PRESENT,
+            watchdog: WatchdogConfig::default(),
         };
         cfg.save_to_path(&path).unwrap();
         let loaded = Config::load_from_path(&path).unwrap();

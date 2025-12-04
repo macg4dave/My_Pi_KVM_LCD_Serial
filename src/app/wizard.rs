@@ -93,12 +93,14 @@ impl FirstRunWizard {
     }
 
     fn run(&mut self, input: PromptInput) -> Result<()> {
-        let mut display = WizardDisplay::new(&self.defaults);
+        let mut prompter = WizardPrompter::new(input);
+        let lcd_present = prompt_lcd_presence(&mut prompter)?;
+        let mut display = WizardDisplay::new(&self.defaults, lcd_present);
         display.banner("First-run wizard", "Check console");
 
-        let mut prompter = WizardPrompter::new(input);
         let candidate_devices = self.device_candidates();
-        let answers = self.collect_answers(&candidate_devices, &mut prompter, &mut display)?;
+        let answers =
+            self.collect_answers(&candidate_devices, &mut prompter, &mut display, lcd_present)?;
         self.save_config(&answers)?;
 
         let probes = run_probes(&answers.device, answers.baud);
@@ -118,6 +120,7 @@ impl FirstRunWizard {
         cfg.baud = answers.baud;
         cfg.cols = answers.cols;
         cfg.rows = answers.rows;
+        cfg.lcd_present = answers.lcd_present;
         cfg.negotiation.preference = answers.preference;
         cfg.save_to_path(&self.config_path)
     }
@@ -127,6 +130,7 @@ impl FirstRunWizard {
         candidates: &[String],
         prompter: &mut WizardPrompter,
         display: &mut WizardDisplay,
+        lcd_present: bool,
     ) -> Result<WizardAnswers> {
         println!("\n=== LifelineTTY first-run wizard ===");
         println!("Answer the following prompts to finish setup. Press enter to accept the suggested value.");
@@ -150,16 +154,22 @@ impl FirstRunWizard {
         display.banner("Target baud", &format!("{} bps", default_baud));
         let baud = prompt_baud(prompter, default_baud)?;
 
-        display.banner("LCD columns", &format!("{} cols", self.defaults.cols));
-        let cols = prompt_dimension(
-            prompter,
-            "LCD columns",
-            self.defaults.cols,
-            MIN_COLS,
-            MAX_COLS,
-        )?;
-        display.banner("LCD rows", &format!("{} rows", self.defaults.rows));
-        let rows = prompt_dimension(prompter, "LCD rows", self.defaults.rows, MIN_ROWS, MAX_ROWS)?;
+        let (cols, rows) = if lcd_present {
+            display.banner("LCD columns", &format!("{} cols", self.defaults.cols));
+            let cols = prompt_dimension(
+                prompter,
+                "LCD columns",
+                self.defaults.cols,
+                MIN_COLS,
+                MAX_COLS,
+            )?;
+            display.banner("LCD rows", &format!("{} rows", self.defaults.rows));
+            let rows =
+                prompt_dimension(prompter, "LCD rows", self.defaults.rows, MIN_ROWS, MAX_ROWS)?;
+            (cols, rows)
+        } else {
+            (self.defaults.cols, 2)
+        };
 
         display.banner("Role preference", "server/client/auto");
         let preference = prompt_role(prompter, self.defaults.negotiation.preference)?;
@@ -170,6 +180,7 @@ impl FirstRunWizard {
             cols,
             rows,
             preference,
+            lcd_present,
         })
     }
 
@@ -201,6 +212,7 @@ struct WizardAnswers {
     cols: u8,
     rows: u8,
     preference: RolePreference,
+    lcd_present: bool,
 }
 
 fn run_probes(device: &str, target_baud: u32) -> Vec<ProbeResult> {
@@ -272,6 +284,7 @@ impl WizardSummary {
         writeln!(file, "baud: {}", entry.answers.baud)?;
         writeln!(file, "cols: {}", entry.answers.cols)?;
         writeln!(file, "rows: {}", entry.answers.rows)?;
+        writeln!(file, "lcd_present: {}", entry.answers.lcd_present)?;
         writeln!(file, "preference: {}", entry.answers.preference.as_str())?;
         for probe in &entry.probes {
             let status = if probe.success { "ok" } else { "error" };
@@ -316,18 +329,22 @@ struct WizardDisplay {
 }
 
 impl WizardDisplay {
-    fn new(defaults: &Config) -> Self {
-        let lcd = Lcd::new(
-            defaults.cols,
-            defaults.rows,
-            defaults.pcf8574_addr.clone(),
-            defaults.display_driver,
-        )
-        .map_err(|err| {
-            eprintln!("lifelinetty wizard: LCD unavailable ({err})");
-            err
-        })
-        .ok();
+    fn new(defaults: &Config, attempt_lcd: bool) -> Self {
+        let lcd = if attempt_lcd {
+            Lcd::new(
+                defaults.cols,
+                defaults.rows,
+                defaults.pcf8574_addr.clone(),
+                defaults.display_driver,
+            )
+            .map_err(|err| {
+                eprintln!("lifelinetty wizard: LCD unavailable ({err})");
+                err
+            })
+            .ok()
+        } else {
+            None
+        };
         Self { lcd }
     }
 
@@ -443,6 +460,17 @@ fn prompt_device(
     }
 }
 
+fn prompt_lcd_presence(prompter: &mut WizardPrompter) -> Result<bool> {
+    loop {
+        let response = prompter.prompt("Is an LCD connected (y/n)", "y")?;
+        match response.trim().to_ascii_lowercase().as_str() {
+            "" | "y" | "yes" => return Ok(true),
+            "n" | "no" => return Ok(false),
+            other => eprintln!("'{other}' is not a yes or no answer. Try y/n."),
+        }
+    }
+}
+
 fn prompt_baud(prompter: &mut WizardPrompter, default: u32) -> Result<u32> {
     loop {
         let response = prompter.prompt(
@@ -529,7 +557,7 @@ mod tests {
         let config_path = dir.path().join("config.toml");
         let defaults = Config::default();
         let mut wizard = FirstRunWizard::new(config_path.clone(), defaults).unwrap();
-        let answers = ["/dev/ttyS42", "19200", "16", "2", "client"];
+        let answers = ["y", "/dev/ttyS42", "19200", "16", "2", "client"];
         wizard
             .run(scripted_input(&answers))
             .expect("wizard run failed");
