@@ -55,7 +55,7 @@ Key settings inside `dev.conf`:
 ```bash
 PI_USER=pi                              # SSH user on the Pi (override when it differs)
 PI_HOST=192.168.20.106                  # Hostname or IP for your Pi
-PI_BIN=/opt/lifelinetty/lifelinetty      # Remote binary path (avoid the login home dir)
+PI_BIN=/home/$PI_USER/lifelinetty/lifelinetty      # Remote binary path (defaults under the SSH user’s home)
 LOCAL_BIN=target/debug/lifelinetty      # Built binary to copy up
 COMMON_ARGS="--run --device /dev/ttyUSB0 --baud 9600 --cols 16 --rows 2"
 REMOTE_ARGS=""                          # Optional remote-only args
@@ -153,7 +153,13 @@ VS Code will surface stdout/stderr inline while your terminal program handles th
 
 - **Live cache pane:** leave `ENABLE_LOG_PANE=true` to keep `/run/serial_lcd_cache/*.log` visible. Swap in a different `LOG_WATCH_CMD` (e.g., `tail -n 50 -f /run/serial_lcd_cache/protocol_errors.log`) when focusing on a specific subsystem.
 - **Pre-flight sanity:** always run `cargo fmt && cargo clippy -- -D warnings && cargo test` locally before pushing binaries to hardware. Catching parser or CLI regressions early saves serial round-trips.
-- **Permissions:** if `run-dev.sh` exits while creating or copying to `$PI_BIN` with `Permission denied`, pre-create the directory with `ssh $PI_USER@$PI_HOST sudo mkdir -p /opt/lifelinetty` and `ssh $PI_USER@$PI_HOST sudo chown $PI_USER /opt/lifelinetty`, or point `PI_BIN` at a directory the SSH user already owns. The script now explains this requirement when it cannot `mkdir -p` the remote path.
+- **Permissions:** `run-dev.sh` now defaults `$PI_BIN` to `/home/$PI_USER/lifelinetty/lifelinetty`, so you should only need to ensure your SSH user owns that directory (the script creates it automatically). If you still get `Permission denied`, adjust `PI_BIN`/Its parent to a writable path or rerun
+
+  ```bash
+  ssh $PI_USER@$PI_HOST sudo mkdir -p /home/$PI_USER/lifelinetty && \
+    ssh $PI_USER@$PI_HOST sudo chown $PI_USER /home/$PI_USER/lifelinetty
+  ```
+
 - **Missing windows:** `run-dev.sh` launches whatever terminal program `TERMINAL_CMD` points at. If a previous set of windows is still open, just reuse or close them before rerunning, or override `TERMINAL_CMD` to point at another emulator (e.g., `xterm`).
 - **Pi cache wiped on reboot:** expect `/run/serial_lcd_cache` to disappear after every reboot. The script recreates it implicitly when the daemon starts, but you can pre-create it via `sudo mkdir -p /run/serial_lcd_cache && sudo chown $(whoami) /run/serial_lcd_cache` for manual tests.
 - **Serial device busy:** verify no other `lifelinetty` instance or `minicom` process has the UART open; the `pkill` step plus stopping systemd usually resolves it.

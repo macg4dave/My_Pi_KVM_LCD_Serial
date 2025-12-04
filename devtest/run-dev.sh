@@ -15,9 +15,11 @@ fi
 command -v ssh >/dev/null 2>&1 || { echo "[ERROR] ssh is required." >&2; exit 1; }
 command -v scp >/dev/null 2>&1 || { echo "[ERROR] scp is required." >&2; exit 1; }
 
+PI_USER=${PI_USER:-pi}
+PI_BIN=${PI_BIN:-/home/"$PI_USER"/lifelinetty/lifelinetty}
+
 : "${PI_HOST:?PI_HOST must be set in dev.conf (hostname, e.g. 192.168.20.106)}"
 : "${PI_BIN:?PI_BIN must be set in dev.conf}"
-PI_USER=${PI_USER:-pi}
 
 TERMINAL_CMD=${TERMINAL_CMD:-gnome-terminal}
 
@@ -31,6 +33,18 @@ ENABLE_LOG_PANE=${ENABLE_LOG_PANE:-false}
 LOG_WATCH_CMD=${LOG_WATCH_CMD:-watch -n 0.5 ls -lh /run/serial_lcd_cache}
 PKILL_PATTERN=${PKILL_PATTERN:-lifelinetty}
 
+CONFIG_SOURCE_FILE=${CONFIG_SOURCE_FILE:-"$SCRIPT_DIR/config/lifelinetty.toml"}
+if [[ ! -f "$CONFIG_SOURCE_FILE" ]]; then
+    echo "[ERROR] Missing dev config template $CONFIG_SOURCE_FILE" >&2
+    exit 1
+fi
+
+LOCAL_CONFIG_HOME=${LOCAL_CONFIG_HOME:-$(mktemp -d -t lifelinetty-home.XXXXXX)}
+LOCAL_CONFIG_DIR="$LOCAL_CONFIG_HOME/.serial_lcd"
+mkdir -p "$LOCAL_CONFIG_DIR"
+cp "$CONFIG_SOURCE_FILE" "$LOCAL_CONFIG_DIR/config.toml"
+echo "[CONFIG] Using $CONFIG_SOURCE_FILE (local HOME=$LOCAL_CONFIG_HOME, remote ~/.serial_lcd)"
+
 printf '[BUILD] Using "%s"\n' "$BUILD_CMD"
 bash -c "$BUILD_CMD"
 
@@ -41,8 +55,27 @@ fi
 remote_dir=$(dirname "$PI_BIN")
 remote_target="$PI_USER@$PI_HOST"
 
+SSH_OPTIONS=(-o BatchMode=yes -o ConnectTimeout=5)
+
+run_remote_cmd() {
+    local cmd="$1"
+    if ! ssh "${SSH_OPTIONS[@]}" "$remote_target" "$cmd"; then
+        local rc=$?
+        echo "[ERROR] Remote command failed on $remote_target: $cmd" >&2
+        echo "[ERROR] See above for the ssh output." >&2
+        return $rc
+    fi
+}
+
+assert_remote_reachable() {
+    if ! run_remote_cmd "true"; then
+        echo "[ERROR] Unable to reach $remote_target. Verify network connectivity and SSH credentials." >&2
+        exit 1
+    fi
+}
+
 ensure_remote_dir() {
-    if ! ssh "$remote_target" "mkdir -p '$remote_dir'"; then
+    if ! run_remote_cmd "mkdir -p '$remote_dir'"; then
         cat <<'EOF' >&2
 [ERROR] Could not create $remote_dir on $remote_target.
 Make sure the path exists and is writable by $PI_USER (for example,
@@ -55,15 +88,26 @@ EOF
     fi
 }
 
+deploy_remote_config() {
+    if ! run_remote_cmd "mkdir -p ~/.serial_lcd"; then
+        echo "[ERROR] Unable to create remote config directory ~/.serial_lcd" >&2
+        exit 1
+    fi
+    echo "[DEPLOY] Copying config $CONFIG_SOURCE_FILE to $remote_target:~/.serial_lcd/config.toml"
+    scp "${SSH_OPTIONS[@]}" "$CONFIG_SOURCE_FILE" "$remote_target:~/.serial_lcd/config.toml"
+}
+
+assert_remote_reachable
 echo "[DEPLOY] Ensuring remote directory $remote_dir"
 ensure_remote_dir
+deploy_remote_config
 
 echo "[DEPLOY] Copying $LOCAL_BIN to $remote_target:$PI_BIN"
 scp "$LOCAL_BIN" "$remote_target:$PI_BIN"
-ssh "$remote_target" "chmod +x '$PI_BIN'"
+run_remote_cmd "chmod +x '$PI_BIN'"
 
 echo "[REMOTE] Killing stale processes matching '$PKILL_PATTERN'"
-ssh "$remote_target" "pkill -f '$PKILL_PATTERN' || true"
+run_remote_cmd "pkill -f '$PKILL_PATTERN' || true"
 
 build_cmd_string() {
     local cmd="$1"; shift
@@ -75,7 +119,7 @@ build_cmd_string() {
 }
 
 REMOTE_CMD=$(build_cmd_string "$PI_BIN" "$COMMON_ARGS" "$REMOTE_ARGS")
-LOCAL_CMD=$(build_cmd_string "$LOCAL_BIN" "$COMMON_ARGS" "$LOCAL_ARGS")
+LOCAL_CMD=$(build_cmd_string "HOME=$LOCAL_CONFIG_HOME" "$LOCAL_BIN" "$COMMON_ARGS" "$LOCAL_ARGS")
 LOG_CMD="$LOG_WATCH_CMD"
 
 terminal_available=true

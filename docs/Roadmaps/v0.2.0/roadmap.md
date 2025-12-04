@@ -15,7 +15,7 @@ LifelineTTY remains a single Rust daemon that ingests newline-delimited JSON via
 ### AI execution cues (read first)
 
 - **Storage**: RAM-disk only at `/run/serial_lcd_cache`; only `~/.serial_lcd/config.toml` persists. Never write elsewhere; clean up cache artifacts.
-- **CLI surface (stable)**: `--run`, `--test-lcd`, `--test-serial`, `--device`, `--baud`, `--cols`, `--rows`, `--demo`, `--serialsh`, `--wizard`. Do **not** add new flags in v0.2.0.
+- **CLI surface (stable)**: `--run`, `--test-lcd`, `--test-serial`, `--device`, `--baud`, `--cols`, `--rows`, `--demo`, `--serialsh`, `--wizard`. Do **not** add new flags in v0.2.0 unless explicitly granted by Milestone 5 (Flag improvements) to introduce the one-off `--config-file <path>` override whose contents become the highest-priority config source for this release. Likewise, do not remove any existing flag without prior approval.
 - **Protocols/transports**: UART newline JSON or `key=value`; HD44780 + PCF8574 @ 0x27 only; no sockets/BLE/HTTP/PTYs.
 - **Allowed crates**: std + charter whitelist (hd44780-driver, linux-embedded-hal, rppal, serialport, tokio-serial async, tokio for async serial, serde/serde_json, crc32fast, ctrlc, anyhow/thiserror, log/tracing, calloop, async-io, syslog-rs, os_info, crossbeam, rustix, sysinfo, futures, directories, humantime, serde_bytes, bincode, clap_complete, indicatif, tokio-util). New crates must be added to `docs/lifelinetty_creates.md` and stay within the whitelist.
 - **Quality bar**: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` on x86_64 + ARMv6; no `unsafe`, no unchecked `unwrap()` in production paths; keep RSS <5 MB and avoid busy loops.
@@ -170,4 +170,14 @@ Record outcomes and defects in RAM-disk logs; reproduce with tests before closin
   - Keep cache/config handling identical to the daemon path: all transient shell artifacts live under `/run/serial_lcd_cache/serialsh*`, and persistent settings remain in `~/.serial_lcd/config.toml`.
 - **Logging & storage:** Reinforce that all shell logs/errors go to stderr (journald when invoked under systemd units) or cache files under `/run/serial_lcd_cache/serialsh*`; do not write anywhere else. Suggest `journalctl -u lifelinetty.service` for prior daemon logs but avoid altering the unit.
 - **Docs/tests:** Update README and wizard helper snippets to clarify the systemd flow (stop service, run shell via SSH/tmux, restart). Add a brief checklist in this roadmap and ensure `tests/bin_smoke.rs` keeps covering `--serialsh` help/usage so behavior stays stable. No new tests are required for systemd itself; this milestone is documentation and ops guidance only.
+
+### Milestone 5 — Flag improvements & custom config override (--Planned)
+
+- **Goal:** Introduce the deliberate exception to the stable CLI surface by adding `--config-file <path>` so operators can point LifelineTTY at a dedicated TOML that overrides `~/.serial_lcd/config.toml` and becomes the highest-priority configuration source, while still honoring environment overrides and per-flag tweaks layered on top.
+- **Implementation:**
+  - Accept `--config-file <path>` across `run`/implicit invocations, call `Config::load_from_path` on that path, and skip the default `~/.serial_lcd/config.toml` when the flag is present so the custom file wins conflicts (env overrides continue to apply on top).
+  - Keep all other flags untouched; explicitly forbid removing any existing flag without permission so this milestone only adds the single override and leaves the CLI surface otherwise stable.
+  - Document the new flag in the CLI help text, README reference table, and relevant docs/tests, making clear that its contents have the final say for v0.2.0.
+- **Logging & storage:** The flag only reads the provided file; persistent writes remain limited to `~/.serial_lcd/config.toml` and `/run/serial_lcd_cache`. Emphasize that the override cannot write outside the chartered paths.
+- **Docs/tests:** Cover the flag in `tests/bin_smoke.rs`/`tests/integration_mock.rs` and add a regression proving that `--config-file` wins over the default path and that environment overrides still apply. Mention the flag in `docs/dev_test_real.md` if it matters for field scripts.
 

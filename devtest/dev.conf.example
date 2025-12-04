@@ -8,9 +8,9 @@
 PI_USER=pi
 PI_HOST=192.168.20.106
 
-# Absolute path where the lifelinetty binary lives on the Pi (avoid using the login home directory).
-# Ensure the directory exists and the SSH user can write to it (e.g., `ssh $PI_USER@$PI_HOST sudo mkdir -p /opt/lifelinetty && ssh $PI_USER@$PI_HOST sudo chown $PI_USER /opt/lifelinetty`).
-PI_BIN=/opt/lifelinetty/lifelinetty
+# Absolute path where the lifelinetty binary lives on the Pi. Defaults to /home/$PI_USER/lifelinetty/lifelinetty so it already lives under the SSH user’s home.
+# Update it if your Pi user stores data elsewhere (or if you want a shared /opt install with manual permissions).
+PI_BIN=/home/$PI_USER/lifelinetty/lifelinetty
 
 # Path to the locally built binary that we copy up
 LOCAL_BIN=target/debug/lifelinetty
