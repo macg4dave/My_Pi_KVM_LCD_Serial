@@ -197,6 +197,28 @@ baud = 9600
 }
 
 #[test]
+fn cli_overrides_cols_and_rows() {
+    with_temp_home(|home| {
+        write_config(
+            home,
+            r#"
+device = "/dev/ttyUSB0"
+cols = 20
+rows = 4
+        "#,
+        );
+        let cfg = Config::load_or_default().expect("config load failed");
+        let mut opts = RunOptions::default();
+        opts.cols = Some(16);
+        opts.rows = Some(2);
+
+        let merged = AppConfig::from_sources(cfg, opts);
+        assert_eq!(merged.cols, 16);
+        assert_eq!(merged.rows, 2);
+    });
+}
+
+#[test]
 fn config_allows_display_driver_selection() {
     with_temp_home(|home| {
         write_config(

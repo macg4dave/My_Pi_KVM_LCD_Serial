@@ -1,0 +1,4 @@
+# Intentionally partial config to ensure defaults are backfilled
+# Device chosen for tests; other fields should be filled with defaults on load
+device = "/dev/ttyAMA0"
+baud = 9600

@@ -364,6 +364,10 @@ Reload config without restarting the daemon:
 - `baud` must be at least 9600 so the serial link always starts from a reliable baseline before additional tuning takes place.
 - Invalid values are rejected on startup with a clear error; use the defaults above if you are unsure.
 
+### Environment overrides
+
+Need a quick, scriptable override without editing the config? Set `LIFELINETTY_DEVICE`, `LIFELINETTY_BAUD`, `LIFELINETTY_COLS`, or `LIFELINETTY_ROWS` in the environment. These apply on top of `~/.serial_lcd/config.toml` (or its defaults), and CLI flags still win over both.
+
 ## CLI reference
 
 `lifelinetty run` is the default command, so you can omit `run` and pass flags directly. Every flag below also works from `~/.serial_lcd/config.toml` unless noted.

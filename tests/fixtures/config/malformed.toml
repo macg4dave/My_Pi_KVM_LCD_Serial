@@ -1,0 +1,4 @@
+# Missing '=' to trigger parser error
+device "/dev/ttyUSB0"
+cols = 16
+rows = 2

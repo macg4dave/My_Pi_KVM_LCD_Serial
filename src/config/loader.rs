@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
 };
@@ -7,11 +8,41 @@ use crate::{compression::CompressionCodec, Error, Result};
 
 use super::{Config, CONFIG_DIR_NAME, CONFIG_FILE_NAME};
 
+const REQUIRED_KEYS: &[&str] = &[
+    "device",
+    "baud",
+    "flow_control",
+    "parity",
+    "stop_bits",
+    "dtr_on_open",
+    "serial_timeout_ms",
+    "cols",
+    "rows",
+    "lcd_present",
+    "scroll_speed_ms",
+    "page_timeout_ms",
+    "polling_enabled",
+    "poll_interval_ms",
+    "button_gpio_pin",
+    "pcf8574_addr",
+    "display_driver",
+    "backoff_initial_ms",
+    "backoff_max_ms",
+    "watchdog.serial_timeout_ms",
+    "watchdog.tunnel_timeout_ms",
+    "negotiation.node_id",
+    "negotiation.preference",
+    "negotiation.timeout_ms",
+    "protocol.schema_version",
+    "command_allowlist",
+];
+
 pub fn load_or_default() -> Result<Config> {
     let path = config_path()?;
     if !path.exists() {
-        let cfg = Config::default();
+        let mut cfg = Config::default();
         cfg.save_to_path(&path)?;
+        apply_env_overrides(&mut cfg)?;
         super::validate(&cfg)?;
         return Ok(cfg);
     }
@@ -24,13 +55,32 @@ pub fn default_config_path() -> Result<PathBuf> {
 
 pub fn load_from_path(path: &Path) -> Result<Config> {
     if !path.exists() {
-        let cfg = Config::default();
+        let mut cfg = Config::default();
+        apply_env_overrides(&mut cfg)?;
         super::validate(&cfg)?;
         return Ok(cfg);
     }
 
     let raw = fs::read_to_string(path)?;
-    parse(&raw)
+    if raw.trim().is_empty() {
+        let mut cfg = Config::default();
+        cfg.save_to_path(path)?;
+        apply_env_overrides(&mut cfg)?;
+        super::validate(&cfg)?;
+        return Ok(cfg);
+    }
+
+    let (mut cfg, seen_keys) = parse_with_seen(&raw)?;
+    let missing_required = missing_required_keys(&seen_keys);
+    if missing_required {
+        // Backfill all defaults into the on-disk config for user visibility without overwriting
+        // environment overrides.
+        cfg.save_to_path(path)?;
+    }
+
+    apply_env_overrides(&mut cfg)?;
+    super::validate(&cfg)?;
+    Ok(cfg)
 }
 
 pub fn save(config: &Config) -> Result<()> {
@@ -113,8 +163,13 @@ timeout_ms = {}\n",
 }
 
 pub fn parse(raw: &str) -> Result<Config> {
+    parse_with_seen(raw).map(|(cfg, _)| cfg)
+}
+
+fn parse_with_seen(raw: &str) -> Result<(Config, HashSet<String>)> {
     let mut cfg = Config::default();
     let mut current_section: Option<&str> = None;
+    let mut seen_keys: HashSet<String> = HashSet::new();
 
     for (idx, line) in raw.lines().enumerate() {
         let trimmed = line.trim();
@@ -141,6 +196,7 @@ pub fn parse(raw: &str) -> Result<Config> {
         } else {
             key.to_string()
         };
+        seen_keys.insert(full_key.clone());
         match full_key.as_str() {
             "device" => cfg.device = value.to_string(),
             "baud" => {
@@ -328,7 +384,7 @@ pub fn parse(raw: &str) -> Result<Config> {
     }
 
     super::validate(&cfg)?;
-    Ok(cfg)
+    Ok((cfg, seen_keys))
 }
 
 fn config_path() -> Result<PathBuf> {
@@ -336,6 +392,47 @@ fn config_path() -> Result<PathBuf> {
         .map(PathBuf::from)
         .ok_or_else(|| Error::InvalidArgs("HOME not set; cannot locate config directory".into()))?;
     Ok(home.join(CONFIG_DIR_NAME).join(CONFIG_FILE_NAME))
+}
+
+fn missing_required_keys(seen_keys: &HashSet<String>) -> bool {
+    let compression_present = seen_keys.contains("protocol.compression")
+        || (seen_keys.contains("protocol.compression_enabled")
+            && seen_keys.contains("protocol.compression_codec"));
+
+    if !compression_present {
+        return true;
+    }
+
+    for key in REQUIRED_KEYS {
+        if !seen_keys.contains(*key) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn apply_env_overrides(cfg: &mut Config) -> Result<()> {
+    if let Ok(device) = std::env::var("LIFELINETTY_DEVICE") {
+        cfg.device = device;
+    }
+    if let Ok(raw_baud) = std::env::var("LIFELINETTY_BAUD") {
+        cfg.baud = raw_baud.parse().map_err(|_| {
+            Error::InvalidArgs("LIFELINETTY_BAUD must be a positive integer".into())
+        })?;
+    }
+    if let Ok(raw_cols) = std::env::var("LIFELINETTY_COLS") {
+        cfg.cols = raw_cols.parse().map_err(|_| {
+            Error::InvalidArgs("LIFELINETTY_COLS must be a positive integer".into())
+        })?;
+    }
+    if let Ok(raw_rows) = std::env::var("LIFELINETTY_ROWS") {
+        cfg.rows = raw_rows.parse().map_err(|_| {
+            Error::InvalidArgs("LIFELINETTY_ROWS must be a positive integer".into())
+        })?;
+    }
+
+    Ok(())
 }
 
 fn parse_string_array(value: &str) -> std::result::Result<Vec<String>, String> {
