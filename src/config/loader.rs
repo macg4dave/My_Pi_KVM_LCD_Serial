@@ -494,4 +494,13 @@ mod tests {
         assert!(format!("{err}").contains("page_timeout_ms"));
         let _ = fs::remove_file(path);
     }
+
+    #[test]
+    fn rejects_baud_below_minimum() {
+        let path = temp_path("baud_low");
+        fs::write(&path, "baud = 4800").unwrap();
+        let err = load_from_path(&path).unwrap_err();
+        assert!(format!("{err}").contains("baud must"));
+        let _ = fs::remove_file(path);
+    }
 }

@@ -16,11 +16,13 @@ This document summarizes the crates currently listed in `Cargo.toml`, how we use
 | `futures` | Core async primitives/combinators. | Building async-aware tunnel readers/writers without full `tokio`. | P8 / Milestone A (command tunnel). |
 | `hd44780-driver` | HD44780 LCD control. | Direct communication with the LCD via I²C backpack. | Core app display updates (all milestones). |
 | `humantime` | Parse/format human-friendly durations. | CLI/config parsing for heartbeat, polling intervals, logging. | P15 / Milestone D (heartbeat). |
+| `lz4_flex` | Fast, pure-Rust LZ4 framing for streaming compression. | Frame encoder/decoder under `src/app/compression.rs` lets us wrap payloads in a compressed envelope with enforced size limits. | P14 (payload compression support). |
 | `indicatif` | Progress bars and CLI indicators. | CLI file transfer UX (`--push/--pull`) without touching the LCD. | P10 / Milestone C (file transfers). |
 | `linux-embedded-hal` | Embedded HAL traits for Linux. | Access to GPIO/I²C backing HD44780 operations on Pi hardware. | Core LCD work + P12 display expansions. |
 | `os_info` | Host OS/arch details. | Attach environment metadata to telemetry or troubleshooting logs. | P11 / Milestone D diagnostics. |
 | `rppal` | Raspberry Pi peripheral access. | GPIO/I²C access for LCD and button input. | Core behavior + P12 display features. |
 | `rustix` | Safe wrappers over Unix syscalls. | Fine-grained control over serial termios/ioctl when `serialport` needs help. | P8 command tunnel serial tweaks. |
+| `zstd` | Zstandard codec for optional compression envelopes. | `src/app/compression.rs` uses the streaming encoder/decoder to compare zstd with LZ4 while keeping decompressed payloads under the 1 MB limit. | P14 (payload compression). |
 | `serde` | Serialization framework. | Deriving payload/config structures. | Everywhere: existing payload parser & future schema work. |
 | `serde_bytes` | Efficient byte array handling in Serde. | Binary payload chunks for tunnels/file transfers. | P10 / Milestone C. |
 | `serde_json` | JSON serialization/deserialization. | Primary payload transport format. | Core behavior + Milestones A–F. |

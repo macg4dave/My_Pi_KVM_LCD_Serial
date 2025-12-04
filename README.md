@@ -215,7 +215,7 @@ Stored at:
 ~/.serial_lcd/config.toml
 ```
 
-By default the daemon listens on `/dev/ttyUSB0` at 9600 8N1. Edit the config (or pass CLI flags) to point at `/dev/ttyAMA0`, `/dev/ttyS0`, USB adapters, or any other TTY that exposes your sender.
+By default the daemon listens on `/dev/ttyUSB0` at 9600 8N1. LifelineTTY always starts at 9600 (the enforced minimum) before any higher-speed tuning happens; a first-run wizard coming soon will run automatically to help you explore faster, stable baud rates. Edit the config (or pass CLI flags) to point at `/dev/ttyAMA0`, `/dev/ttyS0`, USB adapters, or any other TTY that exposes your sender.
 
 Example:
 
@@ -267,6 +267,7 @@ Reload config without restarting the daemon:
 
 - `cols` must be between 8 and 40; `rows` must be between 1 and 4 to match HD44780 glass sizes.
 - `scroll_speed_ms` must be at least 100 ms and `page_timeout_ms` must be at least 500 ms so watchdog UI remains responsive.
+- `baud` must be at least 9600 so the serial link always starts from a reliable baseline before additional tuning takes place.
 - Invalid values are rejected on startup with a clear error; use the defaults above if you are unsure.
 
 ## CLI reference
@@ -276,7 +277,7 @@ Reload config without restarting the daemon:
 | Flag | Purpose | Default / Notes |
 | ---- | ------- | ---------------- |
 | `--device <path>` | Serial device to read newline-delimited JSON from. | `/dev/ttyUSB0` @ 9600 8N1. Override to `/dev/ttyAMA0`, `/dev/ttyS*`, or USB adapters as needed. |
-| `--baud <number>` | Serial baud rate. | `9600` |
+| `--baud <number>` | Serial baud rate. | `9600` (minimum; first-run wizard coming soon to help you tune higher speeds) |
 | `--flow-control <none\|software\|hardware>` | Override whether RTS/CTS or XON/XOFF is asserted on the UART. | `none` |
 | `--parity <none\|odd\|even>` | Choose parity framing when the remote expects it. | `none` |
 | `--stop-bits <1\|2>` | Select one or two stop bits. | `1` |

@@ -22,12 +22,14 @@ crossbeam = "0.8.4"
 directories = "6.0.0"
 futures = { version = "0.3.31", default-features = false }
 humantime = "2.3.0"
+lz4_flex = "0.12.0"
 hd44780-driver = "0.4"
 embedded-hal = "0.2.7"
 embedded-hal-1 = { package = "embedded-hal", version = "1.0" }
 indicatif = "0.18.3"
 os_info = "3.13.0"
 rustix = "1.1.2"
+zstd = "0.13.3"
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11.19"
 serde_json = "1"

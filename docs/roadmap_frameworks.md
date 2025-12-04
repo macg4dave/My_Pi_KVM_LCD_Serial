@@ -6,7 +6,7 @@ New app modules
 
 - `src/app/polling.rs` — Poller & PollSnapshot skeleton (Milestone D / P11)
 - `src/app/file_transfer.rs` — FileTransferManager skeleton for chunking/resume (Milestone C / P10)
-- `src/app/compression.rs` — CompressionCodec enum + noop codec (Milestone F / P14)
+- `src/app/compression.rs` — CompressionCodec plus LZ4/Zstd streaming helpers with a 1 MB decompression cap (Milestone F / P14)
 - `src/app/watchdog.rs` — Watchdog for heartbeat expiry checks (P15)
 - `src/app/negotiation.rs` — Negotiator, Role and Capabilities for handshake (Milestone B / P9)
 - `src/app/telemetry.rs` — Telemetry helper to append small logs into CACHE_DIR (P5)

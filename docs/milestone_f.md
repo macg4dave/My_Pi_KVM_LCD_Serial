@@ -44,15 +44,12 @@ Milestone F keeps the current framing (newline-delimited JSON) but wraps it in 
 
 ### 2. Compression envelope + codec plumbing (P14)
 
-**Files:** `src/payload/parser.rs`, new `src/payload/compression.rs`, `src/serial/*.rs` (for buffer sizing), `docs/architecture.md`, `README.md` (protocol section).
+**Files:** `src/payload/parser.rs`, new `src/app/compression.rs`, `src/serial/*.rs` (for buffer sizing), `docs/architecture.md`, `README.md` (protocol section).
 
-- Add an optional outer envelope: `{ "type": "compressed", "schema_version": N, "codec": "lz4", "original_len": 1234, "data": "<base64>" }`.
-- Prefer a pure Rust codec such as `lz4_flex` for the initial implementation. Adding this crate (or any other codec) requires an explicit charter update before landing; until then the compression path stays behind a feature flag with stubbed hooks. Decompression must enforce:
-  - `original_len ≤ 1_048_576` bytes (hard limit).
-  - `data.len()` sanity checks to avoid allocating huge buffers for clearly invalid frames.
-- Store temporary decompression buffers inside `/run/serial_lcd_cache/payload_cache/` when they cannot fit on the stack. Clean up after each frame to honor the RAM-disk policy.
-- Provide helper APIs so callers can ask `ProtocolFrame::into_render_frame()` without re-running decompression when not needed.
-- Reject unknown codecs or mismatched `original_len` values with `Error::Parse("unsupported codec")` and log the event (see Workstream 5).
+- Add an optional outer envelope such as `{ "type": "compressed", "schema_version": N, "codec": "lz4", "original_len": 1234, "data": "<base64>" }` and let the parser drive the codec selection.
+- Implement the new `src/app/compression.rs` helpers using `lz4_flex` and `zstd` so compressed frames can be round-tripped before the CLI/config toggles land. Streaming encoders emit standard LZ4 frames or zstd streams while the shared bean uses a 4 KB read buffer to keep allocations predictable.
+- Decompression loops rehydrate the payload in chunks, returning `Error::Parse` when the data would exceed 1 MB so `/run/serial_lcd_cache` stays under the 5 MB RSS guardrail; unknown codecs also surface `Error::Parse` today.
+- Export `CompressionCodec` so future readers (handshake state, CLI/config flags) can call into these helpers without duplicating logic, and keep the helpers behind the `app` module until the pending toggles arrive.
 
 ### 3. Capability negotiation hooks (ties into Milestone B)
 
@@ -124,13 +121,13 @@ Milestone F keeps the current framing (newline-delimited JSON) but wraps it in 
 
 ## Allowed crates & dependencies
 
-Schema enforcement and baseline functionality stay within the approved crates: `std`, `serde`, `serde_json`, `crc32fast`, `hd44780-driver`, `serialport`, optional `tokio`/`tokio-serial` via the existing feature, `rppal`, `linux-embedded-hal`, and `ctrlc`. Compression codecs such as `lz4_flex` or `zstd` are **not** currently whitelisted; introducing them requires a signed-off charter update plus dependency review before code lands.
+Schema enforcement and baseline functionality stay within the approved crates: `std`, `serde`, `serde_json`, `crc32fast`, `hd44780-driver`, `serialport`, optional `tokio`/`tokio-serial` via the existing feature, `rppal`, `linux-embedded-hal`, `ctrlc`, and the new compression codecs `lz4_flex` and `zstd` that power `src/app/compression.rs` for P14.
 
 ## Out of scope
 
 - Adding new transport protocols (still newline JSON over UART only).
 - Introducing async runtimes or network sockets for compression helpers; everything stays in the existing sync render loop.
-- Implementing non-whitelisted codecs until the charter explicitly allows them (start with LZ4; zstd arrives only after approval).
+- Introducing codecs beyond LZ4/Zstd remains out of scope until the roadmap explicitly approves additional options.
 - Persisting compressed artifacts outside `/run/serial_lcd_cache`; the only persistent file remains `~/.serial_lcd/config.toml`.
 
 Delivering Milestone F with these constraints keeps the daemon debuggable, resource-safe, and ready for the heavier payloads planned in the file-transfer and tunnel milestones.

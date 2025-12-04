@@ -1,5 +1,6 @@
 pub mod app;
 pub mod cli;
+pub mod compression;
 pub mod config;
 pub mod display;
 pub mod lcd;

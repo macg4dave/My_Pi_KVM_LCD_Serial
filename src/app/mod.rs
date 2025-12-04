@@ -12,7 +12,6 @@ use crate::{
 };
 use std::{fs, str::FromStr, time::Instant};
 
-mod compression;
 mod connection;
 mod demo;
 mod events;
@@ -109,6 +108,7 @@ impl App {
     pub fn from_options(opts: RunOptions) -> Result<Self> {
         let cfg_file = Config::load_or_default()?;
         let merged = AppConfig::from_sources(cfg_file, opts);
+        crate::config::validate_baud(merged.baud)?;
         Self::new(merged)
     }
 
@@ -304,6 +304,18 @@ mod tests {
         assert_eq!(merged.backoff_initial_ms, cfg_file.backoff_initial_ms);
         assert_eq!(merged.backoff_max_ms, cfg_file.backoff_max_ms);
         assert_eq!(merged.pcf8574_addr, cfg_file.pcf8574_addr);
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn rejects_cli_baud_below_minimum() {
+        let home = set_temp_home();
+        let mut opts = RunOptions::default();
+        opts.baud = Some(4_800);
+        match App::from_options(opts) {
+            Err(err) => assert!(format!("{err}").contains("baud must")),
+            Ok(_) => panic!("expected baud validation to fail"),
+        }
         let _ = std::fs::remove_dir_all(home);
     }
 }

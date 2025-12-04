@@ -1,4 +1,5 @@
 use crate::{
+    compression::CompressionCodec,
     config::Pcf8574Addr,
     serial::{DtrBehavior, FlowControlMode, ParityMode, StopBitsMode},
     Error, Result,
@@ -38,6 +39,8 @@ pub struct RunOptions {
     pub pcf8574_addr: Option<Pcf8574Addr>,
     pub log_level: Option<String>,
     pub log_file: Option<String>,
+    pub compression_enabled: Option<bool>,
+    pub compression_codec: Option<CompressionCodec>,
     pub demo: bool,
 }
 
@@ -77,7 +80,7 @@ impl Command {
     }
     pub fn help() -> String {
         let mut help = String::from(
-            "lifelinetty - Serial-to-LCD daemon\n\nUSAGE:\n  lifelinetty run [--device <path>] [--baud <number>] [--cols <number>] [--rows <number>] [--payload-file <path>]\n  lifelinetty --help\n  lifelinetty --version\n\nOPTIONS:\n  --device <path>   Serial device path (default: /dev/ttyUSB0)\n  --baud <number>   Baud rate (default: 9600)\n  --flow-control <none|software|hardware>  Flow control override (default: none)\n  --parity <none|odd|even>       Parity override (default: none)\n  --stop-bits <1|2>              Stop bits override (default: 1)\n  --dtr-on-open <auto|on|off>    Control DTR state when opening the port (default: auto)\n  --serial-timeout-ms <number>   Read timeout in milliseconds (default: 500)\n  --cols <number>   LCD columns (default: 20)\n  --rows <number>   LCD rows (default: 4)\n  --payload-file <path>  Load a local JSON payload and render it once (testing helper)\n  --backoff-initial-ms <number>  Initial reconnect backoff (default: 500)\n  --backoff-max-ms <number>      Maximum reconnect backoff (default: 10000)\n  --pcf8574-addr <auto|0xNN>     PCF8574 I2C address or 'auto' to probe (default: auto)\n  --log-level <error|warn|info|debug|trace>  Log verbosity (default: info)\n  --log-file <path>              Append logs inside /run/serial_lcd_cache (also honors LIFELINETTY_LOG_PATH)\n  --demo                         Run built-in demo pages on the LCD (no serial input)\n",
+            "lifelinetty - Serial-to-LCD daemon\n\nUSAGE:\n  lifelinetty run [--device <path>] [--baud <number>] [--cols <number>] [--rows <number>] [--payload-file <path>]\n  lifelinetty --help\n  lifelinetty --version\n\nOPTIONS:\n  --device <path>   Serial device path (default: /dev/ttyUSB0)\n  --baud <number>   Baud rate (default: 9600)\n  --flow-control <none|software|hardware>  Flow control override (default: none)\n  --parity <none|odd|even>       Parity override (default: none)\n  --stop-bits <1|2>              Stop bits override (default: 1)\n  --dtr-on-open <auto|on|off>    Control DTR state when opening the port (default: auto)\n  --serial-timeout-ms <number>   Read timeout in milliseconds (default: 500)\n  --cols <number>   LCD columns (default: 20)\n  --rows <number>   LCD rows (default: 4)\n  --payload-file <path>  Load a local JSON payload and render it once (testing helper)\n  --backoff-initial-ms <number>  Initial reconnect backoff (default: 500)\n  --backoff-max-ms <number>      Maximum reconnect backoff (default: 10000)\n  --pcf8574-addr <auto|0xNN>     PCF8574 I2C address or 'auto' to probe (default: auto)\n  --log-level <error|warn|info|debug|trace>  Log verbosity (default: info)\n  --log-file <path>              Append logs inside /run/serial_lcd_cache (also honors LIFELINETTY_LOG_PATH)\n  --compressed                   Enable schema compression (applies to schema_v1 payloads)\n  --no-compressed                Disable compression even if config enables it\n  --codec <lz4|zstd>             Codec to use when compression is enabled (default: lz4)\n  --demo                         Run built-in demo pages on the LCD (no serial input)\n",
         );
 
         #[cfg(feature = "serialsh-preview")]
@@ -173,6 +176,19 @@ fn parse_run_options(iter: &mut std::slice::Iter<String>) -> Result<RunOptions> 
             }
             "--log-file" => {
                 opts.log_file = Some(take_value(flag, iter)?);
+            }
+            "--compressed" => {
+                opts.compression_enabled = Some(true);
+            }
+            "--no-compressed" => {
+                opts.compression_enabled = Some(false);
+            }
+            "--codec" => {
+                let raw = take_value(flag, iter)?;
+                opts.compression_codec =
+                    Some(CompressionCodec::from_name(&raw).ok_or_else(|| {
+                        Error::InvalidArgs("codec must be one of: none, lz4, zstd".to_string())
+                    })?);
             }
             "--demo" => {
                 opts.demo = true;
@@ -278,6 +294,8 @@ mod tests {
             pcf8574_addr: Some(Pcf8574Addr::Addr(0x23)),
             log_level: Some("debug".into()),
             log_file: Some("/tmp/lifelinetty.log".into()),
+            compression_enabled: None,
+            compression_codec: None,
             demo: true,
         };
         let cmd = Command::parse(&args).unwrap();
@@ -309,7 +327,32 @@ mod tests {
             pcf8574_addr: None,
             log_level: None,
             log_file: None,
+            compression_enabled: None,
+            compression_codec: None,
             demo: false,
+        };
+        let cmd = Command::parse(&args).unwrap();
+        assert_eq!(cmd, Command::Run(expected));
+    }
+
+    #[test]
+    fn parse_compression_flags() {
+        let args = vec!["--compressed".into(), "--codec".into(), "zstd".into()];
+        let expected = RunOptions {
+            compression_enabled: Some(true),
+            compression_codec: Some(CompressionCodec::Zstd),
+            ..Default::default()
+        };
+        let cmd = Command::parse(&args).unwrap();
+        assert_eq!(cmd, Command::Run(expected));
+    }
+
+    #[test]
+    fn parse_no_compression_flag() {
+        let args = vec!["--no-compressed".into()];
+        let expected = RunOptions {
+            compression_enabled: Some(false),
+            ..Default::default()
         };
         let cmd = Command::parse(&args).unwrap();
         assert_eq!(cmd, Command::Run(expected));

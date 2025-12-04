@@ -10,6 +10,7 @@ pub mod profiles;
 
 pub const DEFAULT_DEVICE: &str = "/dev/ttyUSB0";
 pub const DEFAULT_BAUD: u32 = 9_600;
+pub const MIN_BAUD: u32 = 9_600;
 pub const DEFAULT_COLS: u8 = 20;
 pub const DEFAULT_ROWS: u8 = 4;
 pub const MIN_COLS: u8 = 8;
@@ -188,6 +189,7 @@ fn parse_pcf_addr(raw: &str) -> std::result::Result<Pcf8574Addr, String> {
 }
 
 pub(crate) fn validate(cfg: &Config) -> Result<()> {
+    validate_baud(cfg.baud)?;
     if cfg.cols < MIN_COLS || cfg.cols > MAX_COLS {
         return Err(Error::InvalidArgs(format!(
             "cols must be between {MIN_COLS} and {MAX_COLS}"
@@ -227,6 +229,15 @@ pub(crate) fn validate(cfg: &Config) -> Result<()> {
     {
         return Err(Error::InvalidArgs(format!(
             "negotiation.timeout_ms must be between {MIN_NEGOTIATION_TIMEOUT_MS} and {MAX_NEGOTIATION_TIMEOUT_MS}"
+        )));
+    }
+    Ok(())
+}
+
+pub fn validate_baud(baud: u32) -> Result<()> {
+    if baud < MIN_BAUD {
+        return Err(Error::InvalidArgs(format!(
+            "baud must be at least {MIN_BAUD}"
         )));
     }
     Ok(())

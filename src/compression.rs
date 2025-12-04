@@ -1,12 +1,13 @@
 use crate::{Error, Result};
 use lz4_flex::frame::{FrameDecoder, FrameEncoder};
+use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use zstd::stream::{Decoder as ZstdDecoder, Encoder as ZstdEncoder};
 
 const MAX_DECOMPRESSED_SIZE: usize = 1 * 1024 * 1024;
 
 /// Compression primitives for Milestone F / P14 (payload compression support).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CompressionCodec {
     None,
     Lz4,
@@ -20,6 +21,14 @@ impl CompressionCodec {
             "lz4" => Some(Self::Lz4),
             "zstd" => Some(Self::Zstd),
             _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CompressionCodec::None => "none",
+            CompressionCodec::Lz4 => "lz4",
+            CompressionCodec::Zstd => "zstd",
         }
     }
 }

@@ -48,7 +48,7 @@ There is also a short frameworks document that describes the set of skeleton mod
 | **P10** | **Remote file push/pull transport**: extend payload schema for chunk IDs, checksums, resume markers; add tests covering corruption detection. Respect RAM-only buffering. |
 | **P11** | **Live hardware polling agent**: modular polling routines (CPU %, temps, disk) gated via config, pushing frames through existing render loop without blocking serial ingestion. |
 | **P13** | **JSON-protocol strict mode**: introduce schema validation (Serde enums, length caps) and optional `"schema_version"` header to reject malformed inputs gracefully. |
-| **P14** | **Payload compression support**: evaluate LZ4 vs zstd (pure Rust crates allowed) for UART throughput; ensure streaming decompression fits <5 MB RSS. |
+| **P14 (✅ 4 Dec 2025)** | **Payload compression support**: LZ4 and Zstd streaming helpers now live in `src/app/compression.rs`, bounding decompressed frames to 1 MB so UART bursts stay within the 5 MB RSS guardrail. |
 | **P15** | **Heartbeat + watchdog**: implement mutual heartbeat packets and fail-safe hooks to re-run LCD “offline” screen or trigger local script (within charter: no extra daemons). |
 | **P13 (✅ 3 Dec 2025)** | **JSON-protocol strict mode**: introduce schema validation (Serde enums, length caps) and a required "schema_version" header to reject malformed inputs gracefully. |
 | **P17** | **Remote file integrity tooling**: CLI helper to verify checksums and list staged chunks in `/run/serial_lcd_cache`. |
@@ -56,6 +56,9 @@ There is also a short frameworks document that describes the set of skeleton mod
 | **P20 (✅ 4 Dec 2025)** | **Serial transport resilience**: finalize explicit 8N1 + flow-control defaults in code, expose DTR/RTS toggles + timeout knobs via config for upcoming tunnels, and add structured error mapping/logs so reconnect logic can distinguish permission, unplug, and framing failures before Milestones A–C. _(Status: CLI + config cover flow-control/parity/stop-bits/DTR/timeouts, and telemetry now records categorized permission/unplug/framing causes for each reconnect.)_ |
 | **P21 (✅ 3 Dec 2025)** | **Adopt hd44780-driver crate for Linux builds where possible**: migrate the internal HD44780 driver to use the external `hd44780-driver` crate (via a small adapter for the platform I²C bus) while preserving our public API for any missing functionality. |
 | **P22** | **Custom character support and built in icons**: Add full HD44780 custom-character handling, including a built-in icon set and an API to load/swap glyph banks at runtime. _See Milestone H for execution details._ |
+| **P23** | **Guided first-run setup wizard**: Add an opt-out onboarding flow that interviews operators about desired role (server/client), enumerates TTY devices, probes safe baud rates while honoring the 9600-floor, and writes confirmed answers into `~/.serial_lcd/config.toml`. The wizard must auto-run only when no config exists, skip otherwise, and expose an explicit re-run toggle (CLI flag or env) plus docs/tests. |
+
+To keep the serial link predictable, the daemon now enforces a 9600-baud floor and always starts there automatically. A first-run wizard (Milestone I) will run automatically on fresh installs to help operators identify higher stable baud rates before upping the speed.
 
 ### Priority implementation plan
 
@@ -68,11 +71,12 @@ The remaining priorities can now be tackled in lockstep with the command-tunnel 
 | **P10 — Remote file push/pull transport** | Plan: define chunk manifests in `src/milestones/transfer`, reuse the new command-frame schema to carry chunk metadata, persist resumable manifests in `/run/serial_lcd_cache`, and stream offloaded stdout into the same RAM-disk buffers. Tests will assert CRC detection and resume behavior against the fake serial harness. |
 | **P11 — Live hardware polling agent** | Plan: implement the polling skeleton in `src/app/polling.rs`, feed metrics into the render loop through channels that share the command queue, and expose gating/config options when Milestone D hits. Start by mapping `sysinfo`/`os_info` snapshots into the new render events so dashboards can consume them later. |
 | **P13 — JSON-protocol strict mode** | Plan: expand the parser (`src/payload/parser.rs`) to enforce schema_version tracking, length caps, and optional `schema_version` headers for every tunnel frame; tie this into `CommandBridge` so malformed frames trigger clear parse errors. Align tests with the new strict path (we already reject long lines/icons in payloads). |
-| **P14 — Payload compression support** | Plan: evaluate `lz4_flex` vs `zstd-safe` in `src/app/compression.rs`, cap streaming buffers at <1 MB, and expose the toggle through a future config table so large file transfers/heartbeat bursts stay efficient without violating the 5 MB RSS budget. |
+| **P14 — Payload compression support (✅)** | Status: `src/app/compression.rs` now uses `lz4_flex` and `zstd` to compress/decompress payload envelopes with a 1 MB post-decompression limit, laying the groundwork for CLI/config toggles while preserving the 5 MB RSS constraint. |
 | **P15 — Heartbeat + watchdog** | Plan: revisit Milestone D’s polling/telemetry timers to emit heartbeat frames for both the LCD render loop and the command tunnel, allowing CLI clients to detect stalls and trigger offline screens. Keep watchdog state machines purely in `src/app/watchdog.rs` to avoid extra threads. |
 | **P17 — Remote file integrity tooling** | Plan: add CLI helpers that inspect `/run/serial_lcd_cache` manifests, verify stored checksums, and list incomplete chunk uploads before Milestone C ships. Integrate the existing `crc32fast` helpers, and keep logs inside the RAM disk. |
 | **P19 — Documentation + sample payload refresh** | Plan: refresh `README.md`, `samples/payload_examples*.json`, and `docs/lcd_patterns.md` with the tunnel payload formats, heartbeat guidance, and new icon banking rules once the schema/MLA work stabilizes. |
 | **P22 — Custom character support and built-in icons** | Plan: expand `src/payload/icons.rs` and `src/display/lcd.rs` to manage CGRAM banks, add icon scheduling tests, and document the behavior in `docs/icon_library.md`; tie the icon manager into the command tunnel so remote greet frames can request glyph swaps. |
+| **P23 — Guided first-run wizard** | Plan: hook `src/config/loader.rs` and `src/app/lifecycle.rs` so a missing `~/.serial_lcd/config.toml` triggers an LCD/serial onboarding flow that asks for role preference, TTY path, and baud targets, then persists answers. Provide a `--wizard` (or documented equivalent) re-run path, cache logs under `/run/serial_lcd_cache/wizard/`, and add smoke + integration tests that prove the wizard skips once a config exists. |
 
 By keeping this plan visible in the roadmap, every contributor can spot the dependency graph: P8 feeds Milestone A, which in turn unlocks P9–P11 before the later payload and heartbeat work lands.
 
@@ -231,6 +235,19 @@ The previously cited plan items are now satisfied: the executor handles Busy/Exi
   3. Extend payload/config schema so frames can request icons by name (or inline bitmaps) while validation enforces slot limits.
   4. Add tests + demos covering icon churn, slot eviction, and failure cases; refresh docs/samples so operators can opt in confidently.
 - **Crates & tooling**: no new crates; reuse `hd44780-driver`, `linux-embedded-hal`, `rppal`, `serde`, existing logging utilities. Detailed plan lives in `docs/milestone_h.md`.
+
+### Milestone I — Guided First-Run Wizard
+
+- **Goal**: deliver an interactive first-boot experience that interviews operators about desired role (server or client), preferred TTY device, LCD geometry, and permissible baud rates, then writes the validated answers into `~/.serial_lcd/config.toml` while keeping the LCD online with helpful prompts.
+- **Scope**: `src/config/loader.rs` (fresh-install detection + persistence), `src/app/lifecycle.rs` (wizard dispatcher), `src/app/connection.rs` + serial helpers (TTY enumeration and baud probing), `docs/README.md`, `docs/roadmap_frameworks.md`, and `tests/bin_smoke.rs` for coverage.
+- **Dependencies**: P23, plus existing cache/config guardrails from B3, negotiation state machines from Milestone B, and serial telemetry improvements from P20.
+- **Constraints**: no network or new transport; wizard writes only to `~/.serial_lcd/config.toml` and `/run/serial_lcd_cache/wizard/`. It must honor the 9600-baud floor, skip automatically once a config exists, expose a documented CLI flag (e.g., `--wizard`) or env toggle to re-run intentionally, and keep RSS under 5 MB.
+- **Workflow**:
+  1. Detect missing configs via `ConfigLoader::ensure_default()` and branch into wizard mode before normal run/test routines start.
+  2. Enumerate candidate `/dev/tty*` devices, attempt safe read/write probes, and display findings on the LCD plus over serial logs so headless installs can respond.
+  3. Guide the user through role selection and baud testing, reusing negotiation helpers to preview capability impacts; persist selections alongside negotiation defaults and command allowlists.
+  4. Summarize the outcome, log it to `/run/serial_lcd_cache/wizard/summary.log`, and fall back to standard startup. Provide a `--wizard` code path (authorized by this milestone) plus integration tests proving the wizard skips when the config file already exists.
+- **Crates & tooling**: reuse `serialport`, `tokio-serial` (for async probes when enabled), `directories` for path handling, `serde`/`toml` for config writes, `humantime` for friendly prompt timers, and existing logger infrastructure for LCD + stderr output.
 
 ---
 
