@@ -1,0 +1,37 @@
+# LifelineTTY dev loop configuration
+# Copy this file to dev.conf and tailor it to your environment.
+#
+# All values are shell evaluated, so keep quotes around strings
+# that contain spaces.
+
+# SSH destination for your Raspberry Pi test node
+PI_HOST=pi@192.168.20.106
+
+# Absolute path where the lifelinetty binary should live on the Pi
+PI_BIN=/home/pi/lifelinetty/lifelinetty
+
+# Path to the locally built binary that we copy up
+LOCAL_BIN=target/debug/lifelinetty
+
+# Arguments passed to BOTH the remote and local binaries.
+# Include LCD geometry, device, etc., as needed.
+COMMON_ARGS="--run --device /dev/ttyUSB0 --baud 9600 --cols 16 --rows 2"
+
+# You can optionally add args that only apply to the remote or local
+# process. Leave blank to rely entirely on COMMON_ARGS.
+REMOTE_ARGS=""
+LOCAL_ARGS=""
+
+# Command used for building before deployment. Override if you
+# prefer release builds or cross compilation.
+BUILD_CMD="cargo build"
+
+# Name of the tmux session we create to host the two terminals.
+TMUX_SESSION=lifeline-dev
+
+# Enable a third pane that tails /run/serial_lcd_cache on the Pi.
+ENABLE_LOG_PANE=true
+LOG_WATCH_CMD="watch -n 0.5 ls -lh /run/serial_lcd_cache"
+
+# Pattern used to kill any stale remote processes before launching.
+PKILL_PATTERN=lifelinetty

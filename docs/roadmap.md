@@ -165,7 +165,7 @@ The previously cited plan items are now satisfied: the executor handles Busy/Exi
 - **Summary**: `lifelinetty --serialsh` drops into the `serialsh>` prompt, sends `CmdRequest` frames through the Milestone A tunnel, and prints the streaming stdout/stderr/exit chunks that arrive from the remote host. Busy responses stay evident, the CLI enforces that `--demo`/`--payload-file` cannot be combined with the shell, and systemd units continue to use the headless `run` mode unless manually directed otherwise.
 - **Docs & tests**: README now documents how to invoke the shell, and `tests/bin_smoke.rs` guarantees the help output, prompt, and remote responses remain reliable.
 
-### Milestone H — Custom Character Toolkit & Icon Library
+### Milestone H — Custom Character Toolkit & Icon Library (completed 4 Dec 2025)
 
 - **Goal**: Provide a curated icon registry plus runtime CGRAM bank manager so payload authors can reference semantic icon names instead of hex bitmaps.
 - **Scope**: `src/payload/icons.rs`, `src/display/lcd.rs`, `src/app/render_loop.rs`, `src/config/loader.rs`, `docs/icon_library.md`, `samples/payload_examples.json`, and `tests/*`.

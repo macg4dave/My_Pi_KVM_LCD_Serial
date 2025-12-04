@@ -33,6 +33,10 @@ pub const DEFAULT_BACKOFF_MAX_MS: u64 = 10_000;
 pub const DEFAULT_SERIAL_TIMEOUT_MS: u64 = 500;
 pub const MIN_SERIAL_TIMEOUT_MS: u64 = 50;
 pub const MAX_SERIAL_TIMEOUT_MS: u64 = 60_000;
+pub const DEFAULT_WATCHDOG_SERIAL_TIMEOUT_MS: u64 = 12_000;
+pub const DEFAULT_WATCHDOG_TUNNEL_TIMEOUT_MS: u64 = 5_000;
+pub const MIN_WATCHDOG_TIMEOUT_MS: u64 = 1_000;
+pub const MAX_WATCHDOG_TIMEOUT_MS: u64 = 120_000;
 pub const DEFAULT_NEGOTIATION_NODE_ID: u32 = 42;
 pub const DEFAULT_NEGOTIATION_TIMEOUT_MS: u64 = 1_000;
 pub const MIN_NEGOTIATION_TIMEOUT_MS: u64 = 250;
@@ -133,6 +137,21 @@ impl std::fmt::Display for DisplayDriver {
 
 /// User-supplied settings loaded from the config file.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchdogConfig {
+    pub serial_timeout_ms: u64,
+    pub tunnel_timeout_ms: u64,
+}
+
+impl Default for WatchdogConfig {
+    fn default() -> Self {
+        Self {
+            serial_timeout_ms: DEFAULT_WATCHDOG_SERIAL_TIMEOUT_MS,
+            tunnel_timeout_ms: DEFAULT_WATCHDOG_TUNNEL_TIMEOUT_MS,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     pub device: String,
     pub baud: u32,
@@ -155,6 +174,7 @@ pub struct Config {
     pub negotiation: NegotiationConfig,
     pub command_allowlist: Vec<String>,
     pub protocol: ProtocolConfig,
+    pub watchdog: WatchdogConfig,
 }
 
 impl Default for Config {
@@ -181,6 +201,7 @@ impl Default for Config {
             negotiation: NegotiationConfig::default(),
             command_allowlist: Vec::new(),
             protocol: ProtocolConfig::default(),
+            watchdog: WatchdogConfig::default(),
         }
     }
 }
@@ -271,6 +292,20 @@ pub(crate) fn validate(cfg: &Config) -> Result<()> {
     {
         return Err(Error::InvalidArgs(format!(
             "negotiation.timeout_ms must be between {MIN_NEGOTIATION_TIMEOUT_MS} and {MAX_NEGOTIATION_TIMEOUT_MS}"
+        )));
+    }
+    if cfg.watchdog.serial_timeout_ms < MIN_WATCHDOG_TIMEOUT_MS
+        || cfg.watchdog.serial_timeout_ms > MAX_WATCHDOG_TIMEOUT_MS
+    {
+        return Err(Error::InvalidArgs(format!(
+            "watchdog.serial_timeout_ms must be between {MIN_WATCHDOG_TIMEOUT_MS} and {MAX_WATCHDOG_TIMEOUT_MS}"
+        )));
+    }
+    if cfg.watchdog.tunnel_timeout_ms < MIN_WATCHDOG_TIMEOUT_MS
+        || cfg.watchdog.tunnel_timeout_ms > MAX_WATCHDOG_TIMEOUT_MS
+    {
+        return Err(Error::InvalidArgs(format!(
+            "watchdog.tunnel_timeout_ms must be between {MIN_WATCHDOG_TIMEOUT_MS} and {MAX_WATCHDOG_TIMEOUT_MS}"
         )));
     }
     Ok(())

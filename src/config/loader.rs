@@ -65,6 +65,9 @@ pcf8574_addr = {}\n\
 display_driver = {}\n\
 backoff_initial_ms = {}\n\
 backoff_max_ms = {}\n\
+[watchdog]\n\
+serial_timeout_ms = {}\n\
+tunnel_timeout_ms = {}\n\
 [protocol]\n\
 schema_version = {}\n\
 compression = {{ enabled = {}, codec = \"{}\" }}\n\
@@ -93,6 +96,8 @@ timeout_ms = {}\n",
         super::format_display_driver(&config.display_driver),
         config.backoff_initial_ms,
         config.backoff_max_ms,
+        config.watchdog.serial_timeout_ms,
+        config.watchdog.tunnel_timeout_ms,
         config.protocol.schema_version,
         config.protocol.compression_enabled,
         config.protocol.compression_codec.as_str(),
@@ -214,6 +219,22 @@ pub fn parse(raw: &str) -> Result<Config> {
             "backoff_max_ms" => {
                 cfg.backoff_max_ms = value.parse().map_err(|_| {
                     Error::InvalidArgs(format!("invalid backoff_max_ms on line {}", idx + 1))
+                })?;
+            }
+            "watchdog.serial_timeout_ms" => {
+                cfg.watchdog.serial_timeout_ms = value.parse().map_err(|_| {
+                    Error::InvalidArgs(format!(
+                        "invalid watchdog.serial_timeout_ms on line {}",
+                        idx + 1
+                    ))
+                })?;
+            }
+            "watchdog.tunnel_timeout_ms" => {
+                cfg.watchdog.tunnel_timeout_ms = value.parse().map_err(|_| {
+                    Error::InvalidArgs(format!(
+                        "invalid watchdog.tunnel_timeout_ms on line {}",
+                        idx + 1
+                    ))
                 })?;
             }
             "negotiation.node_id" => {
@@ -549,6 +570,7 @@ mod tests {
                 compression_enabled: true,
                 compression_codec: CompressionCodec::Lz4,
             },
+            watchdog: crate::config::WatchdogConfig::default(),
         };
         save_to_path(&cfg, &path).unwrap();
         let loaded = load_from_path(&path).unwrap();
