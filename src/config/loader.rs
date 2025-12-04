@@ -76,8 +76,8 @@ timeout_ms = {}\n",
         config.rows,
         config.scroll_speed_ms,
         config.page_timeout_ms,
-            config.polling_enabled,
-            config.poll_interval_ms,
+        config.polling_enabled,
+        config.poll_interval_ms,
         config
             .button_gpio_pin
             .map(|p| p.to_string())

@@ -86,17 +86,28 @@ LifelineTTY listens for **one JSON object per line** over a serial port.
 
 ### Icons and overlays
 
-LifelineTTY ships with a few built-in icons so you can decorate alerts and
-status lines without manually loading custom CGRAM entries. Supply an
-`icons` array in your payload and the daemon overlays each glyph in the first
-available slot on the second line. Supported icon names today are
-`"battery"`, `"heart"`, `"arrow"`, and `"wifi"`; unrecognized names are
-silently ignored.
+LifelineTTY now ships with a curated HD44780 icon registry so you can request
+meaningful glyphs without hand-crafting custom CGRAM bytes. Send an `icons`
+array in your payload and the render loop overlays the glyphs into the first
+available slot on the second line, substituting the built-in bitmap if the LCD
+supports it or falling back to plain ASCII when needed.
 
-The `"wifi"` icon simply renders the lowercase `w` character, making it
-compatible with every HD44780 font while still conveying topology status. For a
-full catalog of byte patterns, see
-[`docs/icon_library.md`](docs/icon_library.md).
+Current semantic icon names (case/spacing/hyphen normalizations are accepted)
+include:
+
+```text
+battery, heart, wifi, arrow, bell, note, clockface, duck, check, cross, smile,
+open_heart, up_arrow, up_arrow_right, up_arrow_left, down_arrow,
+down_arrow_right, down_arrow_left, return_arrow, hourglass, degree_symbol,
+degree_c, degree_f
+```
+
+The `wifi` glyph renders as the lowercase `w` so it looks sensible on every
+traditional HD44780 font, while the remaining icons are mapped to the public-
+domain bitmaps mirrored in `src/payload/icons.rs`. Unknown names are ignored so
+typos such as `"batery"` or `"icon"` simply omit the glyph rather than
+crashing the daemon. For the full catalog, attribution, and row-by-row data,
+see [`docs/icon_library.md`](docs/icon_library.md).
 
 Strict mode (enabled by including `schema_version`) also rejects payloads that
 contain fields the current schema does not define. Keep keys tidy—typos like

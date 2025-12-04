@@ -8,7 +8,6 @@ expanded with full implementations and tests in subsequent work.
 New modules created under src/app:
 
 - polling.rs — Milestone D (live hardware polling) skeleton (leverages `systemstat` for the lightweight metrics API)
-- file_transfer.rs — Milestone C (remote file push/pull) skeleton
 - compression.rs — Milestone F (payload compression) skeleton
 - watchdog.rs — Milestone P15 (heartbeat/watchdog) skeleton
 - negotiation.rs — Milestone B (auto-negotiation) skeleton shared between the connection logic and config loader

@@ -15,7 +15,7 @@ use std::{
 const MIN_RENDER_MS: u64 = 200;
 const BLINK_INTERVAL_MS: u64 = 500;
 
-const DEMO_PAYLOADS: [&str; 22] = [
+const DEMO_PAYLOADS: [&str; 26] = [
     r#"{"schema_version":1,"line1":"Up 12:34 CPU 42%","line2":"RAM 73%","bar_value":73,"bar_max":100,"bar_label":"RAM","mode":"dashboard","page_timeout_ms":4000}"#,
     r#"{"schema_version":1,"line1":"CPU LOAD","line2":"Cores busy","bar":68,"bar_label":"CPU","page_timeout_ms":3500}"#,
     r#"{"schema_version":1,"line1":"MEM usage","line2":"Using 1.8GB","bar_value":720,"bar_max":1000,"bar_label":"MEM","page_timeout_ms":3500}"#,
@@ -38,6 +38,10 @@ const DEMO_PAYLOADS: [&str; 22] = [
     r#"{"schema_version":1,"line1":"Slow scroll speed","line2":"abcdefghijklmnopqrstuvwxyz","scroll_speed_ms":400,"page_timeout_ms":4000}"#,
     r#"{"schema_version":1,"line1":"Wide bar label","line2":"","bar":40,"bar_label":"NETWORK","page_timeout_ms":3000}"#,
     r#"{"schema_version":1,"line1":"Checksum demo","line2":"no checksum set","page_timeout_ms":2500}"#,
+    r#"{"schema_version":1,"line1":"Icon showreel","line2":"Battery, heart, wifi","icons":["battery","heart","wifi"],"page_timeout_ms":3500}"#,
+    r#"{"schema_version":1,"line1":"Arrows only","line2":"Up -> Down","icons":["up_arrow","down_arrow","return_arrow"],"page_timeout_ms":3500}"#,
+    r#"{"schema_version":1,"line1":"Degrees °C/°F","line2":"Weather glyphs","icons":["degree_c","degree_f"],"page_timeout_ms":3500}"#,
+    r#"{"schema_version":1,"line1":"Ping-pong alert","line2":"Blinking wifi guard","icons":["wifi"],"blink":true,"backlight":true,"page_timeout_ms":3000}"#,
 ];
 
 pub fn run_demo(lcd: &mut Lcd, config: &mut AppConfig, logger: &Logger) -> Result<()> {

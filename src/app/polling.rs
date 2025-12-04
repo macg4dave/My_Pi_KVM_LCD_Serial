@@ -1,6 +1,9 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc::{self, Receiver}};
+use std::sync::{
+    mpsc::{self, Receiver},
+    Arc,
+};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -55,31 +58,30 @@ pub fn start_polling(interval_ms: u64, app_running: Arc<AtomicBool>) -> PollingH
     let running_clone = running.clone();
     thread::Builder::new()
         .name("lifelinetty-poller".into())
-        .spawn(move || {
-            match Poller::new() {
-                Ok(mut poller) => {
-                    while app_running.load(Ordering::SeqCst)
-                        && running_clone.load(Ordering::SeqCst)
-                    {
-                        let start = Instant::now();
-                        let event = match poller.poll_once() {
-                            Ok(snapshot) => PollEvent::Snapshot(snapshot),
-                            Err(err) => PollEvent::Error(err),
-                        };
-                        let _ = tx.send(event);
-                        let elapsed = start.elapsed();
-                        if elapsed < interval {
-                            thread::sleep(interval - elapsed);
-                        }
+        .spawn(move || match Poller::new() {
+            Ok(mut poller) => {
+                while app_running.load(Ordering::SeqCst) && running_clone.load(Ordering::SeqCst) {
+                    let start = Instant::now();
+                    let event = match poller.poll_once() {
+                        Ok(snapshot) => PollEvent::Snapshot(snapshot),
+                        Err(err) => PollEvent::Error(err),
+                    };
+                    let _ = tx.send(event);
+                    let elapsed = start.elapsed();
+                    if elapsed < interval {
+                        thread::sleep(interval - elapsed);
                     }
                 }
-                Err(err) => {
-                    let _ = tx.send(PollEvent::Error(err));
-                }
+            }
+            Err(err) => {
+                let _ = tx.send(PollEvent::Error(err));
             }
         })
         .expect("failed to spawn poller thread");
-    PollingHandle { receiver: rx, running }
+    PollingHandle {
+        receiver: rx,
+        running,
+    }
 }
 
 struct Poller {
@@ -91,9 +93,7 @@ struct Poller {
 impl Poller {
     fn new() -> Result<Self, String> {
         let stats = StatSystem::new();
-        let cpu_load = stats
-            .cpu_load_aggregate()
-            .map_err(|e| e.to_string())?;
+        let cpu_load = stats.cpu_load_aggregate().map_err(|e| e.to_string())?;
         Ok(Self {
             stats,
             sysinfo: InfoSystem::new(),
@@ -104,10 +104,7 @@ impl Poller {
     fn poll_once(&mut self) -> Result<PollSnapshot, String> {
         let load = self.cpu_load.done().map_err(|e| e.to_string())?;
         let cpu_percent = ((1.0 - load.idle) * 100.0).clamp(0.0, 100.0);
-        self.cpu_load = self
-            .stats
-            .cpu_load_aggregate()
-            .map_err(|e| e.to_string())?;
+        self.cpu_load = self.stats.cpu_load_aggregate().map_err(|e| e.to_string())?;
         self.sysinfo.refresh_memory();
         self.sysinfo.refresh_disks();
         let mem_used = self.sysinfo.used_memory();
