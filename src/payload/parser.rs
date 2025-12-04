@@ -1,9 +1,178 @@
-use crate::{Error, Result};
+use crate::{Error, Result, CACHE_DIR};
 use crc32fast::Hasher;
 use serde::{Deserialize, Serialize};
+use serde_bytes::ByteBuf;
+use std::path::Path;
 
 use super::icons::{parse_display_mode, parse_icons};
 use super::{DisplayMode, Icon, DEFAULT_PAGE_TIMEOUT_MS, DEFAULT_SCROLL_MS};
+
+pub const COMMAND_SCHEMA_VERSION: u8 = 1;
+pub const COMMAND_MAX_FRAME_BYTES: usize = 4 * 1024;
+pub const COMMAND_MAX_COMMAND_CHARS: usize = 512;
+pub const COMMAND_MAX_SCRATCH_PATH_BYTES: usize = 256;
+pub const COMMAND_MAX_CHUNK_BYTES: usize = 2 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandStream {
+    Stdout,
+    Stderr,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CommandMessage {
+    Request {
+        request_id: u32,
+        cmd: String,
+        scratch_path: Option<String>,
+    },
+    Chunk {
+        request_id: u32,
+        stream: CommandStream,
+        seq: u32,
+        #[serde(with = "serde_bytes")]
+        data: ByteBuf,
+    },
+    Exit {
+        request_id: u32,
+        code: i32,
+    },
+    Ack {
+        request_id: u32,
+    },
+    Busy {
+        request_id: u32,
+    },
+    Error {
+        request_id: Option<u32>,
+        message: String,
+    },
+    Heartbeat {
+        request_id: Option<u32>,
+    },
+}
+
+impl CommandMessage {
+    fn crc32(&self) -> Result<u32> {
+        let bytes = serde_json::to_vec(self).map_err(|e| Error::Parse(format!("json: {e}")))?;
+        let mut hasher = Hasher::new();
+        hasher.update(&bytes);
+        Ok(hasher.finalize())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct CommandFrame {
+    channel: String,
+    schema_version: u8,
+    message: CommandMessage,
+    crc32: u32,
+}
+
+#[derive(Debug, Serialize)]
+struct CommandFrameWriter<'a> {
+    channel: &'a str,
+    schema_version: u8,
+    message: &'a CommandMessage,
+    crc32: u32,
+}
+
+pub fn encode_command_frame(msg: &CommandMessage) -> Result<String> {
+    validate_command_message(msg)?;
+    let crc32 = msg.crc32()?;
+    let frame = CommandFrameWriter {
+        channel: "command",
+        schema_version: COMMAND_SCHEMA_VERSION,
+        message: msg,
+        crc32,
+    };
+    let json = serde_json::to_string(&frame).map_err(|e| Error::Parse(format!("json: {e}")))?;
+    if json.as_bytes().len() > COMMAND_MAX_FRAME_BYTES {
+        return Err(Error::Parse(format!(
+            "command frame exceeds {COMMAND_MAX_FRAME_BYTES} bytes"
+        )));
+    }
+    Ok(json)
+}
+
+pub fn decode_command_frame(raw: &str) -> Result<CommandMessage> {
+    if raw.as_bytes().len() > COMMAND_MAX_FRAME_BYTES {
+        return Err(Error::Parse(format!(
+            "command frame exceeds {COMMAND_MAX_FRAME_BYTES} bytes"
+        )));
+    }
+    let frame: CommandFrame =
+        serde_json::from_str(raw).map_err(|e| Error::Parse(format!("json: {e}")))?;
+    if frame.channel != "command" {
+        return Err(Error::Parse("unsupported command channel".into()));
+    }
+    if frame.schema_version != COMMAND_SCHEMA_VERSION {
+        return Err(Error::Parse(format!(
+            "unsupported command schema_version={} expected={COMMAND_SCHEMA_VERSION}",
+            frame.schema_version
+        )));
+    }
+    let computed = frame.message.crc32()?;
+    if computed != frame.crc32 {
+        return Err(Error::ChecksumMismatch);
+    }
+    validate_command_message(&frame.message)?;
+    Ok(frame.message)
+}
+
+fn validate_command_message(msg: &CommandMessage) -> Result<()> {
+    match msg {
+        CommandMessage::Request {
+            cmd, scratch_path, ..
+        } => {
+            if cmd.trim().is_empty() {
+                return Err(Error::Parse("command must not be empty".into()));
+            }
+            if cmd.chars().count() > COMMAND_MAX_COMMAND_CHARS {
+                return Err(Error::Parse(format!(
+                    "command length must be <= {COMMAND_MAX_COMMAND_CHARS} chars"
+                )));
+            }
+            if let Some(path) = scratch_path {
+                validate_cache_path(path)?;
+            }
+        }
+        CommandMessage::Chunk { data, .. } => {
+            if data.len() > COMMAND_MAX_CHUNK_BYTES {
+                return Err(Error::Parse(format!(
+                    "chunk exceeds {COMMAND_MAX_CHUNK_BYTES} bytes"
+                )));
+            }
+        }
+        CommandMessage::Error { message, .. } => {
+            if message.trim().is_empty() {
+                return Err(Error::Parse("error message must not be empty".into()));
+            }
+        }
+        CommandMessage::Exit { .. }
+        | CommandMessage::Ack { .. }
+        | CommandMessage::Busy { .. }
+        | CommandMessage::Heartbeat { .. } => {}
+    }
+    Ok(())
+}
+
+fn validate_cache_path(path: &str) -> Result<()> {
+    if path.as_bytes().len() > COMMAND_MAX_SCRATCH_PATH_BYTES {
+        return Err(Error::Parse(format!(
+            "scratch_path must be <= {COMMAND_MAX_SCRATCH_PATH_BYTES} bytes"
+        )));
+    }
+    let candidate = Path::new(path);
+    if !candidate.starts_with(CACHE_DIR) {
+        return Err(Error::Parse(format!(
+            "scratch_path must live under {CACHE_DIR}: {path}"
+        )));
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Defaults {
@@ -241,6 +410,7 @@ fn compute_bar_percent(payload: &Payload) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_bytes::ByteBuf;
 
     fn parse(raw: &str) -> RenderFrame {
         RenderFrame::from_payload_json(raw).unwrap()
@@ -326,7 +496,7 @@ mod tests {
 
     #[test]
     fn checksum_validates_with_schema_v1() {
-        let mut payload = Payload {
+        let payload = Payload {
             line1: "Hi".into(),
             line2: "There".into(),
             bar: None,
@@ -557,9 +727,59 @@ mod tests {
 
     #[test]
     fn schema_v1_allows_valid_frame() {
-        let icons = vec!["battery", "heart", "arrow", "wifi"];
         let raw = r#"{"schema_version":1,"line1":"Hello","line2":"World","icons":["battery","heart","arrow","wifi"]}"#;
         let frame = RenderFrame::from_payload_json(raw).unwrap();
         assert_eq!(frame.icons.len(), 4);
+    }
+
+    #[test]
+    fn command_frame_round_trip() {
+        let msg = CommandMessage::Request {
+            request_id: 7,
+            cmd: "uptime".into(),
+            scratch_path: Some(format!("{}/tunnel/req7", crate::CACHE_DIR)),
+        };
+        let encoded = encode_command_frame(&msg).unwrap();
+        let decoded = decode_command_frame(&encoded).unwrap();
+        assert!(matches!(
+            decoded,
+            CommandMessage::Request { request_id: 7, .. }
+        ));
+    }
+
+    #[test]
+    fn command_frame_rejects_external_cache_path() {
+        let msg = CommandMessage::Request {
+            request_id: 1,
+            cmd: "whoami".into(),
+            scratch_path: Some("/tmp/out".into()),
+        };
+        let err = encode_command_frame(&msg).unwrap_err();
+        assert!(format!("{err}").contains("scratch_path"));
+    }
+
+    #[test]
+    fn command_frame_rejects_long_command() {
+        let mut cmd = "a".repeat(COMMAND_MAX_COMMAND_CHARS);
+        cmd.push('x');
+        let msg = CommandMessage::Request {
+            request_id: 2,
+            cmd,
+            scratch_path: None,
+        };
+        let err = encode_command_frame(&msg).unwrap_err();
+        assert!(format!("{err}").contains("command length"));
+    }
+
+    #[test]
+    fn command_frame_rejects_large_chunk() {
+        let msg = CommandMessage::Chunk {
+            request_id: 3,
+            stream: CommandStream::Stdout,
+            seq: 0,
+            data: ByteBuf::from(vec![0u8; COMMAND_MAX_CHUNK_BYTES + 1]),
+        };
+        let err = encode_command_frame(&msg).unwrap_err();
+        assert!(format!("{err}").contains("chunk exceeds"));
     }
 }

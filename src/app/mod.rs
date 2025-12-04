@@ -7,7 +7,7 @@ use crate::{
     },
     lcd::Lcd,
     payload::{Defaults as PayloadDefaults, RenderFrame},
-    serial::{DtrBehavior, FlowControlMode, ParityMode, SerialOptions, SerialPort, StopBitsMode},
+    serial::{DtrBehavior, FlowControlMode, ParityMode, SerialOptions, StopBitsMode},
     Result,
 };
 use std::{fs, str::FromStr, time::Instant};
@@ -144,8 +144,11 @@ impl App {
             return render_frame_once(&mut lcd, &frame);
         }
 
-        let serial_connection: Option<SerialPort> =
-            attempt_serial_connect(&self.logger, &config.device, config.serial_options());
+        let (serial_connection, initial_disconnect_reason) =
+            match attempt_serial_connect(&self.logger, &config.device, config.serial_options()) {
+                Ok(port) => (Some(port), None),
+                Err(reason) => (None, Some(reason)),
+            };
         if serial_connection.is_none() {
             let now = Instant::now();
             backoff.mark_failure(now);
@@ -158,6 +161,7 @@ impl App {
             &self.logger,
             backoff,
             serial_connection,
+            initial_disconnect_reason,
         )
     }
 }

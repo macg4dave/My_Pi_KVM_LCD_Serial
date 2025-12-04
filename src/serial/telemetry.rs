@@ -26,6 +26,8 @@ struct BackoffEntry<'a> {
     max_ms: u64,
     device: &'a str,
     baud: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<&'a str>,
 }
 
 pub fn log_backoff_event(
@@ -35,6 +37,7 @@ pub fn log_backoff_event(
     max_ms: u64,
     device: &str,
     baud: u32,
+    reason: Option<&str>,
 ) -> io::Result<()> {
     let entry = BackoffEntry {
         ts_ms: SystemTime::now()
@@ -48,6 +51,7 @@ pub fn log_backoff_event(
         max_ms,
         device,
         baud,
+        reason,
     };
 
     let line =

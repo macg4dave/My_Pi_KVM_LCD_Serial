@@ -1,6 +1,7 @@
 #[cfg(feature = "async-serial")]
 pub mod r#async;
 pub mod backoff;
+pub mod errors;
 pub mod fake;
 pub mod sync;
 pub mod telemetry;
@@ -200,6 +201,7 @@ impl Default for SerialOptions {
     }
 }
 
+pub use errors::{classify_error, classify_io_error, SerialFailureKind};
 pub use sync::SerialPort;
 
 /// Trait used by `app::connection` to negotiate handshake frames.

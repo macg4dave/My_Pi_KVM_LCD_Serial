@@ -41,14 +41,33 @@ There is also a short frameworks document that describes the set of skeleton mod
 | **P10** | **Remote file push/pull transport**: extend payload schema for chunk IDs, checksums, resume markers; add tests covering corruption detection. Respect RAM-only buffering. |
 | **P11** | **Live hardware polling agent**: modular polling routines (CPU %, temps, disk) gated via config, pushing frames through existing render loop without blocking serial ingestion. |
 | **P13** | **JSON-protocol strict mode**: introduce schema validation (Serde enums, length caps) and optional `"schema_version"` header to reject malformed inputs gracefully. |
-| **P14** | **Payload compression support**: evaluate LZ4 vs zstd (pure Rust crates allowed?) for UART throughput; ensure streaming decompression fits <5 MB RSS. |
+| **P14** | **Payload compression support**: evaluate LZ4 vs zstd (pure Rust crates allowed) for UART throughput; ensure streaming decompression fits <5 MB RSS. |
 | **P15** | **Heartbeat + watchdog**: implement mutual heartbeat packets and fail-safe hooks to re-run LCD “offline” screen or trigger local script (within charter: no extra daemons). |
 | **P13 (✅ 3 Dec 2025)** | **JSON-protocol strict mode**: introduce schema validation (Serde enums, length caps) and a required "schema_version" header to reject malformed inputs gracefully. |
 | **P17** | **Remote file integrity tooling**: CLI helper to verify checksums and list staged chunks in `/run/serial_lcd_cache`. |
 | **P19** | **Documentation + sample payload refresh**: update `README.md`, `samples/payload_examples*.json`, and `docs/lcd_patterns.md` showing new modes and tunnels. |
-| **P20 (⚙️ in progress — 4 Dec 2025)** | **Serial transport resilience**: finalize explicit 8N1 + flow-control defaults in code, expose DTR/RTS toggles + timeout knobs via config for upcoming tunnels, and add structured error mapping/logs so reconnect logic can distinguish permission, unplug, and framing failures before Milestones A–C. _(Update: CLI + config now surface flow-control, parity, stop-bits, DTR, and timeout knobs; next up is richer error mapping/logging.)_ |
+| **P20 (✅ 4 Dec 2025)** | **Serial transport resilience**: finalize explicit 8N1 + flow-control defaults in code, expose DTR/RTS toggles + timeout knobs via config for upcoming tunnels, and add structured error mapping/logs so reconnect logic can distinguish permission, unplug, and framing failures before Milestones A–C. _(Status: CLI + config cover flow-control/parity/stop-bits/DTR/timeouts, and telemetry now records categorized permission/unplug/framing causes for each reconnect.)_ |
 | **P21 (✅ 3 Dec 2025)** | **Adopt hd44780-driver crate for Linux builds where possible**: migrate the internal HD44780 driver to use the external `hd44780-driver` crate (via a small adapter for the platform I²C bus) while preserving our public API for any missing functionality. |
 | **P22** | **Custom character support and built in icons**: Add full HD44780 custom-character handling, including a built-in icon set and an API to load/swap glyph banks at runtime. _See Milestone H for execution details._ |
+
+### Priority implementation plan
+
+The remaining priorities can now be tackled in lockstep with the command-tunnel work that is already underway:
+
+| Item | Current focus & next steps |
+| --- | --- |
+| **P8 — Bi-directional command tunnel core (in progress)** | **Status:** command-frame schema, CRC helpers, validation, and parse tests are merged (`src/payload/parser.rs`). Bridges/stubs in `src/app/events.rs` and `src/app/render_loop.rs` now detect `channel:"command"` frames without disturbing the LCD loop. Next: build the session FSM/executor, enqueue stdout/stderr chunks while cementing the allow-list and RAM-disk staging policies. Once command handling can produce `CommandEvent`s and send `TunnelMsg` responses, expand `tests/bin_smoke.rs` and `tests/integration_mock.rs` with command-round-trip coverage. |
+| **P9 — Server/client auto-negotiation** | Plan: formalize the handshake in `src/app/lifecycle.rs` + `src/app/connection.rs`, serialize capability bitmaps through the command tunnel, and enforce deterministic role fallback to LCD-only if the peer is negotiation-unaware. Add `FakeSerialPort` smoke paths that exercise both sides and log negotiation traces under `/run/serial_lcd_cache/negotiation.log`. |
+| **P10 — Remote file push/pull transport** | Plan: define chunk manifests in `src/milestones/transfer`, reuse the new command-frame schema to carry chunk metadata, persist resumable manifests in `/run/serial_lcd_cache`, and stream offloaded stdout into the same RAM-disk buffers. Tests will assert CRC detection and resume behavior against the fake serial harness. |
+| **P11 — Live hardware polling agent** | Plan: implement the polling skeleton in `src/app/polling.rs`, feed metrics into the render loop through channels that share the command queue, and expose gating/config options when Milestone D hits. Start by mapping `sysinfo`/`os_info` snapshots into the new render events so dashboards can consume them later. |
+| **P13 — JSON-protocol strict mode** | Plan: expand the parser (`src/payload/parser.rs`) to enforce schema_version tracking, length caps, and optional `schema_version` headers for every tunnel frame; tie this into `CommandBridge` so malformed frames trigger clear parse errors. Align tests with the new strict path (we already reject long lines/icons in payloads). |
+| **P14 — Payload compression support** | Plan: evaluate `lz4_flex` vs `zstd-safe` in `src/app/compression.rs`, cap streaming buffers at <1 MB, and expose the toggle through a future config table so large file transfers/heartbeat bursts stay efficient without violating the 5 MB RSS budget. |
+| **P15 — Heartbeat + watchdog** | Plan: revisit Milestone D’s polling/telemetry timers to emit heartbeat frames for both the LCD render loop and the command tunnel, allowing CLI clients to detect stalls and trigger offline screens. Keep watchdog state machines purely in `src/app/watchdog.rs` to avoid extra threads. |
+| **P17 — Remote file integrity tooling** | Plan: add CLI helpers that inspect `/run/serial_lcd_cache` manifests, verify stored checksums, and list incomplete chunk uploads before Milestone C ships. Integrate the existing `crc32fast` helpers, and keep logs inside the RAM disk. |
+| **P19 — Documentation + sample payload refresh** | Plan: refresh `README.md`, `samples/payload_examples*.json`, and `docs/lcd_patterns.md` with the tunnel payload formats, heartbeat guidance, and new icon banking rules once the schema/MLA work stabilizes. |
+| **P22 — Custom character support and built-in icons** | Plan: expand `src/payload/icons.rs` and `src/display/lcd.rs` to manage CGRAM banks, add icon scheduling tests, and document the behavior in `docs/icon_library.md`; tie the icon manager into the command tunnel so remote greet frames can request glyph swaps. |
+
+By keeping this plan visible in the roadmap, every contributor can spot the dependency graph: P8 feeds Milestone A, which in turn unlocks P9–P11 before the later payload and heartbeat work lands.
 
 ## Crate guidance for roadmap alignment
 
@@ -89,6 +108,17 @@ Update this section or `docs/createstocheck.md` whenever priorities shift so the
   3. Implement command executor in `src/app/events.rs` that spawns child processes using `std::process::Command` with capped IO buffers in `/run/serial_lcd_cache`.
   4. Add CLI toggles/tests in `tests/bin_smoke.rs` verifying round-trip execution.
 - **Crates & tooling**: standard library, `serialport`, `tokio-serial` (if async shim needed), `thiserror` for tunnel-specific errors, `log`/`tracing` for structured stdout/stderr streaming.
+
+### Milestone A plan & status
+
+Milestone A is now **in progress**: the framing/schema work is merged, the render loop acknowledges `channel:"command"` frames, and the `CommandBridge`/`CommandEvent` router exposes the inlet that the executor will eventually consume. The outstanding steps are:
+
+1. Implement the command FSM in `src/app/events.rs`, capturing `Request`, `Chunk`, `Busy`, and `Exit` transitions with RAM-only stash buffers for stdout/stderr.
+2. Extend `src/app/tunnel.rs` (or a dedicated executor module) to launch whitelisted binaries via `std::process::Command`, stream bounded chunks through `TunnelMsg`, and log under `/run/serial_lcd_cache/tunnel/`.
+3. Wire `tests/bin_smoke.rs` and `tests/integration_mock.rs` to exercise command round-trips, CRC rejection, and `Busy` races across the fake serial harness.
+4. Keep `lifelinetty --serialsh` (feature-gated) as the CLI surface, leaving the default `--run` daemon path focused on LCD rendering.
+
+Once these pieces arrive, Milestone A will own a stable command tunnel that shares the UART with the LCD while honoring the RAM-disk/cache guardrails.
 
 ### Milestone B — Server/Client Auto-Negotiation
 

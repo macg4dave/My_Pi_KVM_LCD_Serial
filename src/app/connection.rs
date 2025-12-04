@@ -1,6 +1,6 @@
 use super::Logger;
 use crate::app::negotiation::{Capabilities, Negotiator, Role, RolePreference};
-use crate::serial::{backoff::BackoffController, LineIo, SerialOptions, SerialPort};
+use crate::serial::{classify_error, LineIo, SerialFailureKind, SerialOptions, SerialPort};
 use serde::Deserialize;
 use serde_json::json;
 use std::{
@@ -23,12 +23,13 @@ pub(crate) fn attempt_serial_connect(
     logger: &Logger,
     device: &str,
     options: SerialOptions,
-) -> Option<SerialPort> {
+) -> Result<SerialPort, SerialFailureKind> {
     match SerialPort::connect(device, options) {
         Ok(mut serial_connection) => {
             if let Err(err) = serial_connection.send_command_line("INIT") {
-                logger.warn(format!("serial init failed: {err}; will retry"));
-                return None;
+                let reason = classify_error(&err);
+                logger.warn(format!("serial init failed [{reason}]: {err}; will retry"));
+                return Err(reason);
             }
             logger.info("serial connected");
             let negotiation = negotiate_handshake(&mut serial_connection, logger);
@@ -40,11 +41,14 @@ pub(crate) fn attempt_serial_connect(
                     negotiation.role.as_str()
                 ));
             }
-            Some(serial_connection)
+            Ok(serial_connection)
         }
         Err(err) => {
-            logger.warn(format!("serial connect failed: {err}; will retry"));
-            None
+            let reason = classify_error(&err);
+            logger.warn(format!(
+                "serial connect failed [{reason}]: {err}; will retry"
+            ));
+            Err(reason)
         }
     }
 }

@@ -8,7 +8,7 @@ use std::{
 };
 
 use super::connection::attempt_serial_connect;
-use super::events::ScrollOffsets;
+use super::events::{CommandBridge, CommandExecutor, ScrollOffsets};
 use super::input::Button;
 use super::lifecycle::{create_shutdown_flag, render_shutdown};
 use super::tunnel::TunnelController;
@@ -21,13 +21,14 @@ use crate::{
     },
     lcd::Lcd,
     payload::{
-        decode_tunnel_frame, encode_tunnel_msg, Defaults as PayloadDefaults, RenderFrame,
-        TunnelMsgOwned,
+        decode_tunnel_frame, encode_command_frame, encode_tunnel_msg, CommandMessage,
+        Defaults as PayloadDefaults, RenderFrame, TunnelMsgOwned,
     },
     serial::{
         backoff::BackoffController,
+        classify_io_error,
         telemetry::{log_backoff_event, BackoffPhase},
-        SerialPort,
+        SerialFailureKind, SerialPort,
     },
     Error, Result,
 };
@@ -52,7 +53,9 @@ fn log_backoff(
     delay_ms: u64,
     backoff: &BackoffController,
     config: &AppConfig,
+    reason: Option<SerialFailureKind>,
 ) {
+    let reason_label = reason.map(|r| r.as_str());
     if let Err(err) = log_backoff_event(
         phase,
         attempt,
@@ -60,6 +63,7 @@ fn log_backoff(
         backoff.max_delay_ms(),
         &config.device,
         config.baud,
+        reason_label,
     ) {
         logger.debug(format!("telemetry write failed: {err}"));
     }
@@ -72,6 +76,7 @@ pub(super) fn run_render_loop(
     logger: &Logger,
     mut backoff: BackoffController,
     mut serial_connection: Option<SerialPort>,
+    initial_disconnect_reason: Option<SerialFailureKind>,
 ) -> Result<()> {
     let mut state = crate::state::RenderState::new(Some(PayloadDefaults {
         scroll_speed_ms: config.scroll_speed_ms,
@@ -96,7 +101,10 @@ pub(super) fn run_render_loop(
     let mut stats = LoopStats::default();
     let mut offline_displayed = false;
     let mut max_backoff_warned = false;
+    let mut last_disconnect_reason = initial_disconnect_reason;
     let mut tunnel = TunnelController::new(config.command_allowlist.clone())?;
+    let mut command_bridge = CommandBridge::new();
+    let mut command_executor = CommandExecutor::new(config.command_allowlist.clone());
 
     if reconnect_displayed {
         render_reconnecting(lcd, config.cols)?;
@@ -109,6 +117,7 @@ pub(super) fn run_render_loop(
         let current_time = Instant::now();
         if let Some(serial_ref) = serial_connection.as_mut() {
             flush_tunnel_messages(serial_ref, &mut tunnel, logger);
+            flush_command_messages(serial_ref, &mut command_executor, logger);
         }
         let heartbeat_active = current_time.duration_since(last_frame_at) >= heartbeat_grace;
         if heartbeat_active && current_time >= next_heartbeat {
@@ -160,10 +169,14 @@ pub(super) fn run_render_loop(
                 delay,
                 &backoff,
                 config,
+                last_disconnect_reason,
             );
+            let reason_suffix = last_disconnect_reason
+                .map(|r| format!(" last_failure={r}"))
+                .unwrap_or_default();
             logger.info(format!(
-                "reconnect attempt #{}, delay={}ms device={} baud={}",
-                stats.reconnects, delay, config.device, config.baud
+                "reconnect attempt #{}, delay={}ms device={} baud={}{}",
+                stats.reconnects, delay, config.device, config.baud, reason_suffix
             ));
             if delay >= backoff.max_delay_ms() && !max_backoff_warned {
                 logger.warn(format!(
@@ -173,7 +186,7 @@ pub(super) fn run_render_loop(
                 max_backoff_warned = true;
             }
             match attempt_serial_connect(logger, &config.device, config.serial_options()) {
-                Some(p) => {
+                Ok(p) => {
                     log_backoff(
                         logger,
                         BackoffPhase::Success,
@@ -181,6 +194,7 @@ pub(super) fn run_render_loop(
                         delay,
                         &backoff,
                         config,
+                        None,
                     );
                     serial_connection = Some(p);
                     backoff.mark_success(current_time);
@@ -189,8 +203,9 @@ pub(super) fn run_render_loop(
                     offline_displayed = false;
                     heartbeat_visible = false;
                     max_backoff_warned = false;
+                    last_disconnect_reason = None;
                 }
-                None => {
+                Err(reason) => {
                     log_backoff(
                         logger,
                         BackoffPhase::Failure,
@@ -198,8 +213,10 @@ pub(super) fn run_render_loop(
                         delay,
                         &backoff,
                         config,
+                        Some(reason),
                     );
-                    backoff.mark_failure(current_time)
+                    backoff.mark_failure(current_time);
+                    last_disconnect_reason = Some(reason);
                 }
             }
         }
@@ -231,6 +248,39 @@ pub(super) fn run_render_loop(
                                     Err(err) => {
                                         logger.warn(format!("tunnel frame error: {err}"));
                                         tunnel.log_frame_error(&format!("tunnel: {err}"), line);
+                                    }
+                                }
+                                continue;
+                            }
+                            if looks_like_command_frame(line) {
+                                match command_bridge.ingest_line(line) {
+                                    Ok(Some(event)) => {
+                                        let label =
+                                            if let Some(id) = command_bridge.last_request_id() {
+                                                format!("cmd#{id} {}", event.kind())
+                                            } else {
+                                                event.kind().to_string()
+                                            };
+                                        logger.debug(format!(
+                                            "command frame buffered ({label}), awaiting executor"
+                                        ));
+                                        if let Some(response) = command_executor.handle_event(event)
+                                        {
+                                            send_command_frame(
+                                                serial_connection_ref,
+                                                response,
+                                                logger,
+                                            );
+                                            flush_command_messages(
+                                                serial_connection_ref,
+                                                &mut command_executor,
+                                                logger,
+                                            );
+                                        }
+                                    }
+                                    Ok(None) => {}
+                                    Err(err) => {
+                                        logger.warn(format!("command frame error: {err}"));
                                     }
                                 }
                                 continue;
@@ -352,10 +402,14 @@ pub(super) fn run_render_loop(
                     }
                 }
                 Err(Error::Io(e)) => {
-                    logger.warn(format!("serial read error: {e}; scheduling reconnect"));
+                    let reason = classify_io_error(&e);
+                    logger.warn(format!(
+                        "serial read error [{reason}]: {e}; scheduling reconnect"
+                    ));
                     serial_connection = None;
                     backoff.mark_failure(current_time);
                     reconnect_displayed = false;
+                    last_disconnect_reason = Some(reason);
                     if !offline_displayed {
                         render_offline_message(lcd, config.cols)?;
                         offline_displayed = true;
@@ -451,6 +505,10 @@ fn looks_like_tunnel_frame(line: &str) -> bool {
     line.contains("\"msg\"") && line.contains("\"crc32\"")
 }
 
+fn looks_like_command_frame(line: &str) -> bool {
+    line.contains("\"channel\":\"command\"") && line.contains("\"crc32\"")
+}
+
 fn flush_tunnel_messages(serial: &mut SerialPort, tunnel: &mut TunnelController, logger: &Logger) {
     while let Some(msg) = tunnel.next_outgoing() {
         send_tunnel_frame(serial, msg, logger);
@@ -466,6 +524,29 @@ fn send_tunnel_frame(serial: &mut SerialPort, msg: TunnelMsgOwned, logger: &Logg
         }
         Err(err) => {
             logger.warn(format!("tunnel encode failed: {err}"));
+        }
+    }
+}
+
+fn flush_command_messages(
+    serial: &mut SerialPort,
+    executor: &mut CommandExecutor,
+    logger: &Logger,
+) {
+    while let Some(msg) = executor.next_outgoing() {
+        send_command_frame(serial, msg, logger);
+    }
+}
+
+fn send_command_frame(serial: &mut SerialPort, msg: CommandMessage, logger: &Logger) {
+    match encode_command_frame(&msg) {
+        Ok(encoded) => {
+            if let Err(err) = serial.send_command_line(&encoded) {
+                logger.warn(format!("command send failed: {err}"));
+            }
+        }
+        Err(err) => {
+            logger.warn(format!("command encode failed: {err}"));
         }
     }
 }
