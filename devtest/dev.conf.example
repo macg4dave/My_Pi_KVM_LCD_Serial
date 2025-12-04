@@ -5,10 +5,12 @@
 # that contain spaces.
 
 # SSH destination for your Raspberry Pi test node
-PI_HOST=pi@192.168.20.106
+PI_USER=pi
+PI_HOST=192.168.20.106
 
-# Absolute path where the lifelinetty binary should live on the Pi
-PI_BIN=/home/pi/lifelinetty/lifelinetty
+# Absolute path where the lifelinetty binary lives on the Pi (avoid using the login home directory).
+# Ensure the directory exists and the SSH user can write to it (e.g., `ssh $PI_USER@$PI_HOST sudo mkdir -p /opt/lifelinetty && ssh $PI_USER@$PI_HOST sudo chown $PI_USER /opt/lifelinetty`).
+PI_BIN=/opt/lifelinetty/lifelinetty
 
 # Path to the locally built binary that we copy up
 LOCAL_BIN=target/debug/lifelinetty
@@ -26,11 +28,11 @@ LOCAL_ARGS=""
 # prefer release builds or cross compilation.
 BUILD_CMD="cargo build"
 
-# Name of the tmux session we create to host the two terminals.
-TMUX_SESSION=lifeline-dev
+# Terminal program used to open remote/local/log windows (needs to support --title and -- bash -lc).
+TERMINAL_CMD=gnome-terminal
 
-# Enable a third pane that tails /run/serial_lcd_cache on the Pi.
-# Keep watchers inside CACHE_DIR to respect the storage policy.
+# Enable log watcher windows that tail /run/serial_lcd_cache on the Pi.
+# Keep watchers inside CACHE_DIR to respect the storage policy and record per-scenario snapshots (e.g., /run/serial_lcd_cache/milestone1/baseline).
 ENABLE_LOG_PANE=true
 LOG_WATCH_CMD="watch -n 0.5 ls -lh /run/serial_lcd_cache"
 

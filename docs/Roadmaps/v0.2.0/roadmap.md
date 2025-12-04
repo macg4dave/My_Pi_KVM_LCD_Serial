@@ -141,6 +141,8 @@ Record outcomes and defects in RAM-disk logs; reproduce with tests before closin
 - **Implementation:** `devtest/run-dev.sh`, `devtest/watch.sh`, and `devtest/watch-remote.sh` run end-to-end with `devtest/dev.conf` (USB0 + S0 @ 9600; USB0 @ 19200; 16×2). Scripts keep cache log watching inside `/run/serial_lcd_cache` and rely solely on SSH/scp/tmux.
 - **Logging & storage:** `docs/dev_test_real.md` documents cache/log collection and matrix checklist with v0.2.0 wording; `devtest/dev.conf.example` defaults stay within charter (9600 baud, `/dev/ttyUSB0`, cache watcher) and remind testers to stop `lifelinetty.service` before runs.
 - **Docs/tests:** Roadmap/workstreams point to the guide; matrix runs record outcomes, and defects uncovered during the loop land with reproducible notes or tests before closing the milestone.
+- **Status & tracking (04 Dec 2025):** Kickoff is active; every scenario run should leave a dated snapshot under `/run/serial_lcd_cache/milestone1/<scenario>-YYYYMMDD` and be retrieved via `scp -r "$PI_HOST:/run/serial_lcd_cache" ./tmp/pi-cache-$(date +%s)` so the field-ops owner can replay the logs and note RSS/timings. Annotate each replay in `docs/dev_test_real.md` (or linked issue) along with the `samples/` payload set used.
+- **Next actions:** Continue cycling baseline, alt-TTY, and higher-baud probes with `devtest/run-dev.sh` and the watch helpers; capture their logs, list any observed defects, and wire them into regression tests (`tests/bin_smoke.rs`, `tests/integration_mock.rs`, etc.) before marking the milestone complete.
 
 ### Milestone 2 — Enhanced first-run wizard (--Planned)
 
