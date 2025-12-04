@@ -99,21 +99,10 @@ fn help_lists_core_flags() {
         );
     }
 
-    #[cfg(feature = "serialsh-preview")]
-    {
-        assert!(
-            help.contains("--serialsh"),
-            "help output missing --serialsh: {help}"
-        );
-    }
-
-    #[cfg(not(feature = "serialsh-preview"))]
-    {
-        assert!(
-            !help.contains("--serialsh"),
-            "help output unexpectedly lists --serialsh without the preview feature"
-        );
-    }
+    assert!(
+        help.contains("--serialsh"),
+        "help output missing --serialsh: {help}"
+    );
 }
 
 #[test]
@@ -185,7 +174,6 @@ display_driver = "hd44780-driver"
     });
 }
 
-#[cfg(feature = "serialsh-preview")]
 mod serialsh_smoke {
     use super::*;
     use lifelinetty::app::serial_shell::{drive_serial_shell_loop, SerialShellTransport};

@@ -1,7 +1,4 @@
-#[cfg(feature = "serialsh-preview")]
 use lifelinetty::app::serial_shell;
-#[cfg(not(feature = "serialsh-preview"))]
-use lifelinetty::Error;
 use lifelinetty::{
     app::App,
     cli::{Command, RunMode, RunOptions},
@@ -41,14 +38,6 @@ fn try_main() -> Result<()> {
     }
 }
 
-#[cfg(feature = "serialsh-preview")]
 fn run_serial_shell(opts: RunOptions) -> Result<()> {
     serial_shell::run_serial_shell(opts)
-}
-
-#[cfg(not(feature = "serialsh-preview"))]
-fn run_serial_shell(_opts: RunOptions) -> Result<()> {
-    Err(Error::InvalidArgs(
-        "--serialsh requires building with the 'serialsh-preview' feature".into(),
-    ))
 }

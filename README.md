@@ -1,42 +1,4 @@
-# LifelineTTY (formerly SerialLCD) — A Powerful, Drop‑In Display Engine for Raspberry Pi & Linux
-
-LifelineTTY (previously called SerialLCD) turns any **HD44780‑compatible character LCD** (16×2, 20×4, 16×4, 40×20 into a **smart, JSON‑driven dashboard** for your Raspberry Pi or Linux device.
-
-If you want a **clean, easy way to show system stats, alerts, KVM info, network activity, or anything else** on a LCD screen — LifelineTTY does all the hard work for you.
-
-**No I²C code. No screen‑handling logic. Just send JSON → the display updates.**
-
-It’s compact, robust, beginner‑friendly, and powerful enough for advanced setups.
-
----
-
-## What LifelineTTY Gives You (Why It's Special)
-
-- **True plug‑and‑play** LCD support  
-  Works with *any* HD44780 LCD using a PCF8574 I²C backpack — the most common type used by Pi and Arduino hobbyists.
-
-- **Simple JSON Interface**  
-  Send a JSON line and the LCD updates instantly.
-
-- **Three polished display modes**  
-  - Normal (default)
-  - Dashboard (metrics + bar graph)
-  - Banner (scrolling marquee)
-
-- **Real bar graphs** with smooth fill steps  
-- **Scrolling text**, **paging**, **alerts**, **backlight control**
-
-- Fully test your setup with **demo mode!** (`--demo`) that:
-  - Proves your wiring is correct  
-  - Shows every feature (bars, scrolling, icons, alerts)  
-  - Helps you understand exactly what kind of JSON to send  
-
-- Extremely resilient:  
-  - Detects serial errors  
-  - Shows “offline” screens  
-  - Recovers automatically  
-
-Everything is designed so that **any Pi beginner** can get results in minutes, while more advanced users can script anything they want.
+# LifelineTTY — 
 
 ---
 
@@ -292,12 +254,12 @@ Reload config without restarting the daemon:
 | `--log-level <error\|warn\|info\|debug\|trace>` | Verbosity for stderr/file logs. | `info` (also configurable via `LIFELINETTY_LOG_LEVEL`). |
 | `--log-file <path>` | Append logs to a file inside `/run/serial_lcd_cache` (also honors `LIFELINETTY_LOG_PATH`). | No file logging unless you provide a cache-rooted path. |
 | `--demo` | Run built-in demo pages to validate wiring—no serial input required. | Disabled by default. |
-| `--serialsh` | **Preview (feature `serialsh-preview`)**: open the interactive serial shell that sends one-line commands through the tunnel and streams remote stdout/stderr plus the exit code. | Hidden behind the preview feature; releases omit the flag to keep automation stable. |
+| `--serialsh` | Launch the optional serial shell that sends commands through the tunnel and streams remote stdout/stderr plus exit codes. | Disabled by default so daemons keep running headless unless you explicitly opt into the interactive session. |
 | `--help` / `--version` | Display usage or the crate version. | Utility flags that never touch hardware. |
 
-- **Preview builds only:** compile with `cargo run --features serialsh-preview -- --run --serialsh` to exercise the gated flag. Official releases omit the flag entirely so existing automation stays stable.
+### Serial shell mode (Milestone G)
 
-> 💡 **Milestone A (P7/P8) shipped:** the `serialsh-preview` feature now powers a full serial shell client that leverages the Milestone A tunnel (commands, stdout/stderr chunks, and remote exit codes). Keep the flag hidden in production, but feel free to try the interactive session on preview builds.
+Milestone G supplies an official interactive shell for the command tunnel. Run `lifelinetty --serialsh` to drop into the `serialsh>` prompt, send JSON `CmdRequest` frames, and stream the remote stdout/stderr chunks plus their exit code. Busy responses and command failures stay visible so you always know when the remote host is congested. The CLI rejects `--demo` and `--payload-file` when `--serialsh` is enabled so that the tunnel stays dedicated to interactive commands, and the default systemd service still runs the headless `lifelinetty run` path unless you explicitly launch the shell yourself.
 
 ### Serial precedence cheatsheet
 
@@ -424,16 +386,3 @@ It’s one of the easiest ways to add a live display to a Raspberry Pi project �
 Enjoy the project — and watch for the companion **lifelinetty‑send** tool coming soon!
 
 ---
-
-## About SerialLCD (Alpha)
-
-**LifelineTTY is the production release.** SerialLCD was an alpha preview and is no longer supported. No backward compatibility is maintained.
-
-If you were using SerialLCD, migrate your setup to LifelineTTY:
-
-- Download and install the latest LifelineTTY release from the GitHub releases page.
-- Update your scripts and configs to use `lifelinetty` instead of `seriallcd`.
-- Configuration file path remains `~/.serial_lcd/config.toml`; all existing configs are compatible.
-- JSON payload format is unchanged — your sender scripts will work as-is.
-
-For details on what's new in LifelineTTY, see the roadmap and architecture docs.

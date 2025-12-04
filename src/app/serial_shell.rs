@@ -1,5 +1,3 @@
-#![cfg(feature = "serialsh-preview")]
-
 use crate::payload::{decode_tunnel_frame, encode_tunnel_msg};
 use crate::{
     app::AppConfig, cli::RunOptions, config::Config, payload::TunnelMsgOwned, serial::SerialPort,

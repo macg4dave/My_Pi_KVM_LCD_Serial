@@ -22,7 +22,6 @@ mod logger;
 mod negotiation;
 mod polling;
 mod render_loop;
-#[cfg(feature = "serialsh-preview")]
 pub mod serial_shell;
 mod telemetry;
 mod tunnel;

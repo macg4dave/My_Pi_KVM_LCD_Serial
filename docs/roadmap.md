@@ -42,7 +42,7 @@ There is also a short frameworks document that describes the set of skeleton mod
 | **P3 (✅ 2 Dec 2025)** | **Config loader hardening**: enhance `src/config/loader.rs` to validate cols/rows ranges, default scroll/page timings, and ensure `~/.serial_lcd/config.toml` schema doc matches real struct. |
 | **P4 (✅ 2 Dec 2025)** | **LCD driver regression tests**: expand `src/lcd_driver` tests for flicker-free updates, blinking, and icon resets; ensure no `unsafe`. |
 | **P5 (✅ 2 Dec 2025)** | **Serial backoff telemetry**: add structured logging to `src/serial/*` capturing reconnect counts into `/run/serial_lcd_cache/serial_backoff.log`, respecting RAM-only constraint. |
-| **P7 (✅ 3 Dec 2025)** | **CLI integration mode groundwork**: implemented `serialsh` preview flag (gated behind `serialsh-preview` feature), added `ShellContext` preview run path, and tests reflecting the flow. |
+| **P7 (✅ 3 Dec 2025)** | **CLI integration mode groundwork**: `--serialsh` now ships with the default binary, plumbing the CLI command loop into the tunnel and bolstering the smoke suite around the interactive flow. |
 | **P8 (✅ 4 Dec 2025)** | **Bi-directional command tunnel core**: base framing library in `src/payload/parser.rs` for command request/response envelopes (no network). Must reuse newline JSON framing. _(Status: CommandBridge, CommandExecutor, and TunnelController now translate request frames into stdout/stderr/exit responses with Busy/error handling and logging under `/run/serial_lcd_cache/tunnel/`.)_ |
 | **P9 (✅ 4 Dec 2025)** | **Server/client auto-negotiation**: implement handshake state in `src/app/connection.rs`, ensuring deterministic fallback to current behaviour when remote does not understand negotiation packets. _(Status: INIT handshakes emit hello/hello_ack frames with capability bits, handshake results are recorded via `NegotiationLog`, and legacy peers trigger LCD-only fallbacks.)_ |
 | **P10** | **Remote file push/pull transport**: extend payload schema for chunk IDs, checksums, resume markers; add tests covering corruption detection. Respect RAM-only buffering. |
@@ -123,7 +123,7 @@ Update this section or `docs/createstocheck.md` whenever priorities shift so the
 
 ### Milestone A plan & status
 
-Milestone A is now **complete**: the `CommandBridge`/`CommandEvent` pipeline routinely decodes `channel:"command"` frames, the `CommandExecutor` manages session state for whitelisted commands, and the `TunnelController` turns the streamed `Stdout`/`Stderr`/`Exit` chunks into `TunnelMsgOwned` responses while logging decode failures under `/run/serial_lcd_cache/tunnel/errors.log`. The preview `--serialsh` flag wires straight into this tunnel so that `serialsh-preview` builds continue to offer an interactive shell that respects Busy responses and reports the remote exit code without disturbing the LCD render loop.
+Milestone A is now **complete**: the `CommandBridge`/`CommandEvent` pipeline routinely decodes `channel:"command"` frames, the `CommandExecutor` manages session state for whitelisted commands, and the `TunnelController` turns the streamed `Stdout`/`Stderr`/`Exit` chunks into `TunnelMsgOwned` responses while logging decode failures under `/run/serial_lcd_cache/tunnel/errors.log`. The `--serialsh` flag wires straight into this tunnel so that interactive sessions respect Busy responses and report remote exit codes without disturbing the LCD render loop.
 
 The previously cited plan items are now satisfied: the executor handles Busy/Exit transitions, the runnable shell bears out command round-trips (see the new smoke coverage in `tests/bin_smoke.rs`), and CRC tampering is rejected early (now guarded by `tests/integration_mock.rs`). With Milestone A shipped, the focus moves on to Milestone B (auto-negotiation) and the P9+ priorities that build on a stable command tunnel.
 
@@ -140,7 +140,6 @@ The previously cited plan items are now satisfied: the executor handles Busy/Exi
   4. Document expected behavior and add integration tests with fake serial endpoints (`tests/fake_serial_loop.rs`).
 - **Crates & tooling**: `serialport`, `tokio` (for async timeout), `anyhow`/`thiserror` for richer negotiation errors, `log` for trace-level negotiation logging.
 
-
 ### Milestone D — Live Hardware Polling
 
 - **Goal**: gather CPU/mem/temp/disk/network metrics
@@ -152,9 +151,6 @@ The previously cited plan items are now satisfied: the executor handles Busy/Exi
   2. Publish metrics into render queue via channels guarded by `std::sync::mpsc` or `crossbeam` (if later approved) to avoid blocking serial ingestion.
   3. Implement heartbeat packets (serde structs) and integrate into render loop timers; fallback to offline screen if missed.
 - **Crates & tooling**: `systemstat` for lightweight CPU/memory/disk snapshots, `os_info` for system information, `sysinfo` for live hardware info, `log` for watchdog alerts, optional `tokio` timers if async polling chosen.
-
-
-
 
 ### Milestone F — JSON-Protocol Mode + Payload Compression
 
@@ -171,16 +167,9 @@ The previously cited plan items are now satisfied: the executor handles Busy/Exi
 
 ### Milestone G — CLI Integration Mode (serialsh)
 
-- **Goal**: Program behaves like a pseudo-shell when invoked with a special flag, piping commands to remote tunnel and showing immediate output.
-- **Scope**: CLI UX in `src/cli.rs`, command loop integration in `src/app/mod.rs`, docs/README updates.
-- **Dependencies**: Milestone A completion, P16.
-- **Constraints**: maintain compatibility with existing `--run` default; serialsh must remain optional and disabled on boot services unless configured.
-- **Workflow**:
-  1. Extend CLI parser to accept `--serialsh` and interactive options (history file stored in RAM disk if needed).
-  2. Wire CLI loop to command tunnel channel, handling Ctrl+C via `ctrlc` crate (if approved) to send termination packets.
-  3. Ensure output formatting mirrors POSIX shells while staying pure text (no ANSI requirements by default).
-  4. Add doc section + integration tests verifying exit codes and error handling.
-- **Crates & tooling**: `clap`-style parsing currently in tree (custom), consider `rustyline` alternative only if allowed; otherwise use `std::io` for line editing; `ctrlc` (already dependency) for signal handling.
+- **Status**: **complete (4 Dec 2025)** — the optional `--serialsh` flag now ships with `lifelinetty` and can be used whenever you need an interactive terminal over the command tunnel.
+- **Summary**: `lifelinetty --serialsh` drops into the `serialsh>` prompt, sends `CmdRequest` frames through the Milestone A tunnel, and prints the streaming stdout/stderr/exit chunks that arrive from the remote host. Busy responses stay evident, the CLI enforces that `--demo`/`--payload-file` cannot be combined with the shell, and systemd units continue to use the headless `run` mode unless manually directed otherwise.
+- **Docs & tests**: README now documents how to invoke the shell, and `tests/bin_smoke.rs` guarantees the help output, prompt, and remote responses remain reliable.
 
 ### Milestone H — Custom Character Toolkit & Icon Library
 
@@ -270,4 +259,3 @@ _Status (3 Dec 2025): The shared adapter now supports both rppal and linux-emb
 
     - Owner: hardware/driver engineer (TBD).
     - Estimate: 1–2 weeks split across development, testing, and smoke runs.
-

@@ -85,12 +85,9 @@ impl Command {
             "lifelinetty - Serial-to-LCD daemon\n\nUSAGE:\n  lifelinetty run [--device <path>] [--baud <number>] [--cols <number>] [--rows <number>] [--payload-file <path>]\n  lifelinetty --help\n  lifelinetty --version\n\nOPTIONS:\n  --device <path>   Serial device path (default: /dev/ttyUSB0)\n  --baud <number>   Baud rate (default: 9600)\n  --flow-control <none|software|hardware>  Flow control override (default: none)\n  --parity <none|odd|even>       Parity override (default: none)\n  --stop-bits <1|2>              Stop bits override (default: 1)\n  --dtr-on-open <auto|on|off>    Control DTR state when opening the port (default: auto)\n  --serial-timeout-ms <number>   Read timeout in milliseconds (default: 500)\n  --cols <number>   LCD columns (default: 20)\n  --rows <number>   LCD rows (default: 4)\n  --payload-file <path>  Load a local JSON payload and render it once (testing helper)\n  --backoff-initial-ms <number>  Initial reconnect backoff (default: 500)\n  --backoff-max-ms <number>      Maximum reconnect backoff (default: 10000)\n  --pcf8574-addr <auto|0xNN>     PCF8574 I2C address or 'auto' to probe (default: auto)\n  --log-level <error|warn|info|debug|trace>  Log verbosity (default: info)\n  --log-file <path>              Append logs inside /run/serial_lcd_cache (also honors LIFELINETTY_LOG_PATH)\n  --polling                      Enable hardware polling (default: config)\n  --no-polling                   Disable hardware polling even if config enables it\n  --poll-interval-ms <number>    Polling interval in milliseconds (default: 5000)\n  --compressed                   Enable schema compression (applies to schema_v1 payloads)\n  --no-compressed                Disable compression even if config enables it\n  --codec <lz4|zstd>             Codec to use when compression is enabled (default: lz4)\n  --demo                         Run built-in demo pages on the LCD (no serial input)\n",
         );
 
-        #[cfg(feature = "serialsh-preview")]
-        {
-            help.push_str(
-                "  --serialsh                   Preview: enable the serial shell mode (feature-gated, incomplete)\n",
-            );
-        }
+        help.push_str(
+            "  --serialsh                   Enable the optional serial shell that runs commands over the tunnel and streams remote stdout/stderr + exit codes\n",
+        );
 
         help.push_str("  -h, --help        Show this help\n  -V, --version     Show version\n");
         help
@@ -207,9 +204,8 @@ fn parse_run_options(iter: &mut std::slice::Iter<String>) -> Result<RunOptions> 
             "--demo" => {
                 opts.demo = true;
             }
-            #[cfg(feature = "serialsh-preview")]
             "--serialsh" => {
-                // P7: expose the serial shell gate while milestone A wiring lands.
+                // Milestone G: run the CLI serial shell through the command tunnel.
                 opts.mode = RunMode::SerialShell;
             }
             other => {
@@ -230,18 +226,12 @@ fn take_value(flag: &str, iter: &mut std::slice::Iter<String>) -> Result<String>
         .ok_or_else(|| Error::InvalidArgs(format!("expected a value after {flag}")))
 }
 
-#[cfg(feature = "serialsh-preview")]
 fn validate_serialsh_options(opts: &RunOptions) -> Result<()> {
     if matches!(opts.mode, RunMode::SerialShell) && (opts.payload_file.is_some() || opts.demo) {
         return Err(Error::InvalidArgs(
             "--serialsh cannot be combined with --demo or --payload-file".to_string(),
         ));
     }
-    Ok(())
-}
-
-#[cfg(not(feature = "serialsh-preview"))]
-fn validate_serialsh_options(_opts: &RunOptions) -> Result<()> {
     Ok(())
 }
 
@@ -378,7 +368,11 @@ mod tests {
 
     #[test]
     fn parse_polling_flags() {
-        let args = vec!["--polling".into(), "--poll-interval-ms".into(), "3000".into()];
+        let args = vec![
+            "--polling".into(),
+            "--poll-interval-ms".into(),
+            "3000".into(),
+        ];
         let expected = RunOptions {
             polling_enabled: Some(true),
             poll_interval_ms: Some(3000),
@@ -413,7 +407,6 @@ mod tests {
         assert!(format!("{err}").contains("unknown flag"));
     }
 
-    #[cfg(feature = "serialsh-preview")]
     #[test]
     fn parse_serialsh_flag_sets_mode() {
         let args = vec!["--serialsh".into(), "--device".into(), "fake".into()];
@@ -424,7 +417,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "serialsh-preview")]
     #[test]
     fn serialsh_disallows_demo_and_payload_file() {
         let args = vec!["--serialsh".into(), "--demo".into()];
@@ -436,14 +428,6 @@ mod tests {
             "--payload-file".into(),
             "payload.json".into(),
         ];
-        let err = Command::parse(&args).unwrap_err();
-        assert!(format!("{err}").contains("serialsh"));
-    }
-
-    #[cfg(not(feature = "serialsh-preview"))]
-    #[test]
-    fn serialsh_flag_requires_feature() {
-        let args = vec!["--serialsh".into()];
         let err = Command::parse(&args).unwrap_err();
         assert!(format!("{err}").contains("serialsh"));
     }
