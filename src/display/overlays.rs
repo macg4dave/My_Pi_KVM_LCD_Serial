@@ -2,7 +2,10 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::{
-    display::lcd::{Lcd, BAR_LEVELS, BATTERY_CHAR, HEARTBEAT_CHAR, WIFI_CHAR},
+    display::{
+        icon_bank::{IconBank, IconPalette, PaletteRequest},
+        lcd::Lcd,
+    },
     payload::{Icon, RenderFrame},
     Error, Result,
 };
@@ -11,7 +14,8 @@ const SCROLL_GAP: &str = "    |    ";
 
 /// Render a single frame with no scrolling offsets.
 pub fn render_frame_once(lcd: &mut Lcd, frame: &RenderFrame) -> Result<()> {
-    render_frame_with_scroll(lcd, frame, (0, 0), false)
+    let mut icon_bank = IconBank::new();
+    render_frame_with_scroll(lcd, frame, (0, 0), false, &mut icon_bank).map(|_| ())
 }
 
 /// Render a frame, applying scroll offsets and optional heartbeat overlay.
@@ -20,7 +24,8 @@ pub fn render_frame_with_scroll(
     frame: &RenderFrame,
     offsets: (usize, usize),
     heartbeat_on: bool,
-) -> Result<()> {
+    icon_bank: &mut IconBank,
+) -> Result<IconPalette> {
     lcd.set_blink(frame.blink)?;
 
     if frame.clear {
@@ -28,27 +33,42 @@ pub fn render_frame_with_scroll(
     }
 
     let width = lcd.cols() as usize;
+    let palette = icon_bank.build_palette(
+        lcd,
+        PaletteRequest {
+            bar_required: frame.bar_percent.is_some(),
+            heartbeat: heartbeat_on,
+            icons: &frame.icons,
+        },
+    )?;
     let bar_row = frame.bar_row;
     let mut line1 = if bar_row == Some(0) && frame.bar_percent.is_some() {
-        render_bar(frame.bar_percent.unwrap(), width)
+        render_bar(frame.bar_percent.unwrap(), width, &palette)
     } else {
         view_line(&frame.line1, width, offsets.0, frame.scroll_enabled)
     };
     let mut line2 = if bar_row == Some(1) && frame.bar_percent.is_some() {
-        render_bar(frame.bar_percent.unwrap(), width)
+        render_bar(frame.bar_percent.unwrap(), width, &palette)
     } else {
         view_line(&frame.line2, width, offsets.1, frame.scroll_enabled)
     };
 
     if heartbeat_on && width > 0 {
         if bar_row == Some(0) {
-            overlay_heartbeat(&mut line2, width);
+            overlay_heartbeat(&mut line2, width, &palette);
         } else {
-            overlay_heartbeat(&mut line1, width);
+            overlay_heartbeat(&mut line1, width, &palette);
         }
     }
 
-    overlay_icons(&mut line1, &mut line2, width, &frame.icons, bar_row);
+    overlay_icons(
+        &mut line1,
+        &mut line2,
+        width,
+        &frame.icons,
+        bar_row,
+        &palette,
+    );
 
     let out1 = if line1.trim().is_empty() && bar_row != Some(0) {
         ""
@@ -61,7 +81,8 @@ pub fn render_frame_with_scroll(
         &line2
     };
 
-    lcd.write_lines(out1, out2)
+    lcd.write_lines(out1, out2)?;
+    Ok(palette)
 }
 
 /// Avoids flicker by respecting a minimum interval between render calls.
@@ -72,13 +93,15 @@ pub fn render_if_allowed(
     min_interval: Duration,
     scroll_offsets: (usize, usize),
     heartbeat_on: bool,
-) -> Result<()> {
+    icon_bank: &mut IconBank,
+) -> Result<Option<IconPalette>> {
     let now = Instant::now();
     if now.duration_since(*last_render) < min_interval {
-        return Ok(());
+        return Ok(None);
     }
     *last_render = now;
-    render_frame_with_scroll(lcd, frame, scroll_offsets, heartbeat_on)
+    let palette = render_frame_with_scroll(lcd, frame, scroll_offsets, heartbeat_on, icon_bank)?;
+    Ok(Some(palette))
 }
 
 pub fn line_needs_scroll(text: &str, width: usize) -> bool {
@@ -129,19 +152,19 @@ pub fn render_offline_message(lcd: &mut Lcd, cols: u8) -> Result<()> {
     Ok(())
 }
 
-fn render_bar(percent: u8, width: usize) -> String {
+fn render_bar(percent: u8, width: usize, palette: &IconPalette) -> String {
     if width == 0 {
         return String::new();
     }
 
-    let max_level = BAR_LEVELS.len() - 1;
+    let max_level = 5usize;
     let total_units = width * max_level;
     let filled_units = (percent as usize * total_units) / 100;
     let mut s = String::with_capacity(width);
     for col in 0..width {
         let remaining = filled_units.saturating_sub(col * max_level);
         let level = remaining.min(max_level);
-        s.push(BAR_LEVELS[level]);
+        s.push(palette.bar_char(level));
     }
     s
 }
@@ -187,7 +210,7 @@ fn truncate_with_ellipsis(text: &str, width: usize) -> String {
     s
 }
 
-fn overlay_heartbeat(text: &mut String, width: usize) {
+fn overlay_heartbeat(text: &mut String, width: usize, palette: &IconPalette) {
     if width == 0 {
         return;
     }
@@ -198,7 +221,7 @@ fn overlay_heartbeat(text: &mut String, width: usize) {
         chars.truncate(width);
     }
     if let Some(last) = chars.last_mut() {
-        *last = HEARTBEAT_CHAR;
+        *last = palette.heartbeat_char();
     }
     *text = chars.into_iter().collect();
 }
@@ -209,12 +232,14 @@ fn overlay_icons(
     width: usize,
     icons: &[Icon],
     bar_row: Option<u8>,
+    palette: &IconPalette,
 ) {
     if icons.is_empty() || width == 0 {
         return;
     }
     let target = if bar_row == Some(1) { line1 } else { line2 };
-    let Some(icon_char) = overlay_icon_char(icons[0]) else {
+    let icon = icons[0];
+    let Some(icon_char) = palette.icon_char(icon).or_else(|| icon.ascii_fallback()) else {
         return;
     };
     let mut chars: Vec<char> = target.chars().collect();
@@ -227,15 +252,6 @@ fn overlay_icons(
         *last = icon_char;
     }
     *target = chars.into_iter().collect();
-}
-
-fn overlay_icon_char(icon: Icon) -> Option<char> {
-    match icon {
-        Icon::Battery => Some(BATTERY_CHAR),
-        Icon::Heart | Icon::OpenHeart => Some(HEARTBEAT_CHAR),
-        Icon::Wifi => Some(WIFI_CHAR),
-        _ => icon.ascii_fallback(),
-    }
 }
 
 #[cfg(test)]

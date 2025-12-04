@@ -119,7 +119,7 @@ impl ExternalHd44780 {
         Ok(())
     }
 
-    fn custom_char(&mut self, location: u8, pattern: &[u8; 8]) -> Result<()> {
+    pub fn custom_char(&mut self, location: u8, pattern: &[u8; 8]) -> Result<()> {
         self.write_cgram(location, pattern)?;
         self.move_to(self.cursor_x, self.cursor_y)
     }

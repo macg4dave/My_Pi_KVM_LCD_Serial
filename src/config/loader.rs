@@ -271,8 +271,8 @@ pub fn parse(raw: &str) -> Result<Config> {
                 })?;
             }
             "protocol.compression_codec" => {
-                cfg.protocol.compression_codec = CompressionCodec::from_name(value)
-                    .ok_or_else(|| {
+                cfg.protocol.compression_codec =
+                    CompressionCodec::from_name(value).ok_or_else(|| {
                         Error::InvalidArgs(format!(
                             "invalid protocol.compression_codec on line {}",
                             idx + 1
@@ -369,7 +369,9 @@ fn parse_protocol_compression_table(
 ) -> std::result::Result<(bool, CompressionCodec), String> {
     let trimmed = value.trim();
     if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
-        return Err("expected inline table literal (e.g., { enabled = false, codec = \"lz4\" })".into());
+        return Err(
+            "expected inline table literal (e.g., { enabled = false, codec = \"lz4\" })".into(),
+        );
     }
     let inner = &trimmed[1..trimmed.len() - 1];
     let mut enabled: Option<bool> = None;

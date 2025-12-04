@@ -71,6 +71,8 @@ pub struct Lcd {
     blink_on: bool,
     #[cfg(not(target_os = "linux"))]
     clears: usize,
+    #[cfg(not(target_os = "linux"))]
+    custom_chars: [[u8; 8]; 8],
 }
 
 impl Lcd {
@@ -98,6 +100,7 @@ impl Lcd {
                 backlight_on: true,
                 blink_on: false,
                 clears: 0,
+                custom_chars: [[0u8; 8]; 8],
             })
         }
     }
@@ -174,6 +177,20 @@ impl Lcd {
     pub fn write_lines(&mut self, line1: &str, line2: &str) -> Result<()> {
         self.write_line(0, line1)?;
         self.write_line(1, line2)
+    }
+
+    pub(crate) fn write_custom_char(&mut self, slot: u8, bitmap: &[u8; 8]) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            self.driver.custom_char(slot, bitmap)
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            let idx = (slot as usize).min(self.custom_chars.len().saturating_sub(1));
+            self.custom_chars[idx] = *bitmap;
+            Ok(())
+        }
     }
 
     pub fn cols(&self) -> u8 {
@@ -327,6 +344,13 @@ impl InternalDriver {
             InternalDriver::I2cdev(driver) => load_bar_glyphs_internal(driver),
         }
     }
+
+    fn custom_char(&mut self, slot: u8, bitmap: &[u8; 8]) -> Result<()> {
+        match self {
+            InternalDriver::Rppal(driver) => driver.custom_char(slot, bitmap),
+            InternalDriver::I2cdev(driver) => driver.custom_char(slot, bitmap),
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -424,6 +448,13 @@ impl DriverBackend {
         match self {
             DriverBackend::Internal(driver) => driver.load_bar_glyphs(),
             DriverBackend::External(driver) => load_bar_glyphs_external(driver),
+        }
+    }
+
+    fn custom_char(&mut self, slot: u8, bitmap: &[u8; 8]) -> Result<()> {
+        match self {
+            DriverBackend::Internal(driver) => driver.custom_char(slot, bitmap),
+            DriverBackend::External(driver) => driver.custom_char(slot, bitmap),
         }
     }
 }

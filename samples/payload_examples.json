@@ -2,4 +2,14 @@
 
 {"schema_version":1,"line1":"HELLO","line2":"WORLD","icons":["battery","heart"]}
 
+{"schema_version":1,"line1":"NAV","line2":"Arrows","icons":["up_arrow","down_arrow_left","return_arrow","hourglass"],"bar":42}
+
 {"type":"compressed","schema_version":1,"codec":"lz4","original_len":64,"data":"BASE64-LZ4-BYTES"}
+
+{"schema_version":1,"line1":"CMD TUNNEL","line2":"serialsh ready","icons":["arrow","return_arrow","hourglass"],"bar":55,"bar_label":"TUNNEL","bar_line1":true,"page_timeout_ms":3500,"scroll":false}
+
+{"schema_version":1,"line1":"POLL CPU42 MEM58","line2":"TEMP 37C DISK 71%","bar_value":37,"bar_max":100,"bar_label":"TEMP","bar_line1":true,"icons":["degree_c","battery"],"scroll_speed_ms":180,"page_timeout_ms":5000}
+
+{"schema_version":1,"line1":"ICON HEARTBEAT","line2":"Blink + icons","icons":["heart","hourglass"],"blink":true,"duration_ms":2500,"backlight":true}
+
+{"schema_version":1,"line1":"CONFIG UPDATED","line2":"Reload complete","config_reload":true,"duration_ms":1500,"scroll":false}

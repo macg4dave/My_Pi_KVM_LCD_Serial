@@ -20,9 +20,12 @@ use super::tunnel::TunnelController;
 use super::{AppConfig, LogLevel, Logger};
 use crate::{
     config::Config,
-    display::overlays::{
-        advance_offset, line_needs_scroll, render_if_allowed, render_offline_message,
-        render_parse_error, render_reconnecting,
+    display::{
+        icon_bank::{IconBank, IconPalette},
+        overlays::{
+            advance_offset, line_needs_scroll, render_if_allowed, render_offline_message,
+            render_parse_error, render_reconnecting,
+        },
     },
     lcd::Lcd,
     payload::{
@@ -172,6 +175,24 @@ struct LoopStats {
     reconnects: u64,
 }
 
+fn log_icon_fallbacks(logger: &Logger, palette: Option<IconPalette>) {
+    let Some(palette) = palette else {
+        return;
+    };
+    if palette.missing_icons.is_empty() {
+        return;
+    }
+    let joined = palette
+        .missing_icons
+        .iter()
+        .map(|icon| format!("{icon:?}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    logger.debug(format!(
+        "icon bank saturated; falling back to ASCII for [{joined}]"
+    ));
+}
+
 fn log_backoff(
     logger: &Logger,
     phase: BackoffPhase,
@@ -209,6 +230,7 @@ pub(super) fn run_render_loop(
         scroll_speed_ms: config.scroll_speed_ms,
         page_timeout_ms: config.page_timeout_ms,
     }));
+    let mut icon_bank = IconBank::new();
     let mut incoming_line = String::new();
     let mut last_render = Instant::now();
     let min_render_interval = Duration::from_millis(200);
@@ -289,14 +311,16 @@ pub(super) fn run_render_loop(
                     lcd.clear()?;
                     if let Some(frame) = current_frame.as_ref() {
                         next_page = current_time + Duration::from_millis(frame.page_timeout_ms);
-                        render_if_allowed(
+                        let palette = render_if_allowed(
                             lcd,
                             frame,
                             &mut last_render,
                             min_render_interval,
                             (scroll_offsets.top, scroll_offsets.bottom),
                             heartbeat_on,
+                            &mut icon_bank,
                         )?;
+                        log_icon_fallbacks(logger, palette);
                     }
                 }
             }
@@ -528,14 +552,16 @@ pub(super) fn run_render_loop(
                                     if let Some(frame) = current_frame.as_ref() {
                                         next_page = current_time
                                             + Duration::from_millis(frame.page_timeout_ms);
-                                        render_if_allowed(
+                                        let palette = render_if_allowed(
                                             lcd,
                                             frame,
                                             &mut last_render,
                                             min_render_interval,
                                             (scroll_offsets.top, scroll_offsets.bottom),
                                             heartbeat_on,
+                                            &mut icon_bank,
                                         )?;
+                                        log_icon_fallbacks(logger, palette);
                                     }
                                 }
                                 Ok(None) => {
@@ -592,14 +618,16 @@ pub(super) fn run_render_loop(
                     lcd.set_backlight(backlight_state)?;
                     lcd.set_blink(frame.blink)?;
                     next_blink = current_time + blink_interval;
-                    render_if_allowed(
+                    let palette = render_if_allowed(
                         lcd,
                         frame,
                         &mut last_render,
                         min_render_interval,
                         (scroll_offsets.top, scroll_offsets.bottom),
                         heartbeat_on,
+                        &mut icon_bank,
                     )?;
+                    log_icon_fallbacks(logger, palette);
                 }
             }
         }
@@ -622,14 +650,16 @@ pub(super) fn run_render_loop(
                     advance_offset(&frame.line2, lcd.cols() as usize, scroll_offsets.bottom),
                 );
                 next_scroll = current_time + Duration::from_millis(frame.scroll_speed_ms);
-                render_if_allowed(
+                let palette = render_if_allowed(
                     lcd,
                     frame,
                     &mut last_render,
                     min_render_interval,
                     (scroll_offsets.top, scroll_offsets.bottom),
                     heartbeat_on,
+                    &mut icon_bank,
                 )?;
+                log_icon_fallbacks(logger, palette);
             }
 
             if frame.blink {

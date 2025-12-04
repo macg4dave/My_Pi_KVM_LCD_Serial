@@ -1,7 +1,8 @@
 use super::{lifecycle::create_shutdown_flag, AppConfig, Logger};
 use crate::{
-    display::overlays::{
-        advance_offset, line_needs_scroll, render_if_allowed, render_offline_message,
+    display::{
+        icon_bank::{IconBank, IconPalette},
+        overlays::{advance_offset, line_needs_scroll, render_if_allowed, render_offline_message},
     },
     lcd::Lcd,
     payload::{Defaults as PayloadDefaults, RenderFrame},
@@ -67,18 +68,21 @@ pub fn run_demo(lcd: &mut Lcd, config: &mut AppConfig, logger: &Logger) -> Resul
     let mut backlight_state = current_frame.backlight_on;
     let blink_interval = Duration::from_millis(BLINK_INTERVAL_MS);
     let mut next_blink = Instant::now() + blink_interval;
+    let mut icon_bank = IconBank::new();
 
     lcd.clear()?;
     lcd.set_backlight(current_frame.backlight_on)?;
     lcd.set_blink(current_frame.blink)?;
-    render_if_allowed(
+    let palette = render_if_allowed(
         lcd,
         &current_frame,
         &mut last_render,
         min_render_interval,
         (scroll_offsets.top, scroll_offsets.bottom),
         false,
+        &mut icon_bank,
     )?;
+    log_demo_icon_fallbacks(logger, palette);
 
     while running.load(std::sync::atomic::Ordering::SeqCst) {
         let now = Instant::now();
@@ -95,14 +99,16 @@ pub fn run_demo(lcd: &mut Lcd, config: &mut AppConfig, logger: &Logger) -> Resul
             lcd.clear()?;
             lcd.set_backlight(current_frame.backlight_on)?;
             lcd.set_blink(current_frame.blink)?;
-            render_if_allowed(
+            let palette = render_if_allowed(
                 lcd,
                 &current_frame,
                 &mut last_render,
                 min_render_interval,
                 (scroll_offsets.top, scroll_offsets.bottom),
                 false,
+                &mut icon_bank,
             )?;
+            log_demo_icon_fallbacks(logger, palette);
         }
 
         // Scrolling
@@ -134,14 +140,16 @@ pub fn run_demo(lcd: &mut Lcd, config: &mut AppConfig, logger: &Logger) -> Resul
                 ),
             );
             next_scroll = now + Duration::from_millis(current_frame.scroll_speed_ms);
-            render_if_allowed(
+            let palette = render_if_allowed(
                 lcd,
                 &current_frame,
                 &mut last_render,
                 min_render_interval,
                 (scroll_offsets.top, scroll_offsets.bottom),
                 false,
+                &mut icon_bank,
             )?;
+            log_demo_icon_fallbacks(logger, palette);
         }
 
         // Blink backlight for alert frames.
@@ -156,6 +164,24 @@ pub fn run_demo(lcd: &mut Lcd, config: &mut AppConfig, logger: &Logger) -> Resul
 
     render_offline_message(lcd, config.cols)?;
     Ok(())
+}
+
+fn log_demo_icon_fallbacks(logger: &Logger, palette: Option<IconPalette>) {
+    let Some(palette) = palette else {
+        return;
+    };
+    if palette.missing_icons.is_empty() {
+        return;
+    }
+    let joined = palette
+        .missing_icons
+        .iter()
+        .map(|icon| format!("{icon:?}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    logger.debug(format!(
+        "demo icon fallback: CGRAM full, showing ASCII for [{joined}]"
+    ));
 }
 
 fn build_demo_frames(defaults: PayloadDefaults) -> Result<Vec<RenderFrame>> {

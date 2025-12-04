@@ -6,7 +6,9 @@ use std::{
 use crc32fast::Hasher;
 
 use crate::{
-    payload::{normalize_payload_json, Defaults, RenderFrame, DEFAULT_PAGE_TIMEOUT_MS, DEFAULT_SCROLL_MS},
+    payload::{
+        normalize_payload_json, Defaults, RenderFrame, DEFAULT_PAGE_TIMEOUT_MS, DEFAULT_SCROLL_MS,
+    },
     Error, Result,
 };
 

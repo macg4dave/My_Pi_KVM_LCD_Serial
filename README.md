@@ -73,7 +73,8 @@ You’ll see:
 
 If you see animations, your wiring is perfect.
 
-`--demo` is your best friend.
+`--demo` is your best friend. For a shot-by-shot breakdown of every playlist frame plus tips for
+building your own sample payloads, see [`docs/demo_playbook.md`](docs/demo_playbook.md).
 
 Note for builders: the included `Makefile` and `scripts/local-release.sh` will prefer native host builds when your machine matches the requested target (for example, building arm64 on an aarch64 host). Set `FORCE_DOCKER=1` to force the Docker cross-build path if needed.
 
@@ -86,11 +87,11 @@ LifelineTTY listens for **one JSON object per line** over a serial port.
 
 ### Icons and overlays
 
-LifelineTTY now ships with a curated HD44780 icon registry so you can request
-meaningful glyphs without hand-crafting custom CGRAM bytes. Send an `icons`
-array in your payload and the render loop overlays the glyphs into the first
-available slot on the second line, substituting the built-in bitmap if the LCD
-supports it or falling back to plain ASCII when needed.
+LifelineTTY now ships with a curated HD44780 icon registry and a runtime CGRAM
+bank manager so you can request meaningful glyphs without hand-crafting custom
+bytes. Send an `icons` array in your payload and the render loop hot-swaps the
+needed bitmaps into the LCD before each render pass, falling back to ASCII when
+the request would exceed the hardware’s eight custom slots.
 
 Current semantic icon names (case/spacing/hyphen normalizations are accepted)
 include:
@@ -102,12 +103,14 @@ down_arrow_right, down_arrow_left, return_arrow, hourglass, degree_symbol,
 degree_c, degree_f
 ```
 
-The `wifi` glyph renders as the lowercase `w` so it looks sensible on every
-traditional HD44780 font, while the remaining icons are mapped to the public-
-domain bitmaps mirrored in `src/payload/icons.rs`. Unknown names are ignored so
-typos such as `"batery"` or `"icon"` simply omit the glyph rather than
-crashing the daemon. For the full catalog, attribution, and row-by-row data,
-see [`docs/icon_library.md`](docs/icon_library.md).
+Each render can stage up to eight custom glyphs, and the bar graph + heartbeat
+overlays reserve part of that budget when they are active. When a frame asks
+for more icons than can fit, the extras fall back to their ASCII placeholder
+(`wifi` becomes `w`, `heart` becomes `h`, etc.) and the daemon emits a debug log
+so you can trim the payload. Unknown names are ignored entirely, so typos such
+as `"batery"` or `"icon"` simply omit the glyph rather than crashing the
+daemon. For the full catalog, attribution, and row-by-row data, see
+[`docs/icon_library.md`](docs/icon_library.md).
 
 Strict mode (enabled by including `schema_version`) also rejects payloads that
 contain fields the current schema does not define. Keep keys tidy—typos like
@@ -116,6 +119,7 @@ will trigger a validation error and drop the frame.
 
 ```json
 {"schema_version":1,"line1":"Wi-Fi","line2":"Icons!","icons":["wifi","battery"]}
+{"schema_version":1,"line1":"NAV","line2":"↕","icons":["up_arrow","down_arrow_left","return_arrow","hourglass"],"bar":42}
 ```
 
 
@@ -182,7 +186,7 @@ wrap each payload in a tiny envelope so the UART only ships compressed bytes:
 - `codec` must be one of `lz4`, `zstd`, or `none`.
 - `original_len` protects against truncated base64 blobs; mismatches are rejected.
 - `data` is base64-encoded LZ4/Zstd bytes; `serde_bytes` handles the encoding automatically if
-	you serialize a `Vec<u8>`/`ByteBuf`.
+  you serialize a `Vec<u8>`/`ByteBuf`.
 
 The render loop now normalizes envelopes before deduplication, so the same logical payload counts
 as a duplicate whether it was sent compressed or plain-text. Malformed envelopes never crash the

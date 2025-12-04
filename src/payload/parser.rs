@@ -203,8 +203,8 @@ pub fn normalize_payload_json<'a>(raw: &'a str) -> Result<Cow<'a, str>> {
         return Ok(Cow::Borrowed(raw));
     }
 
-    let envelope: CompressionEnvelopeOwned = serde_json::from_str(raw)
-        .map_err(|e| Error::Parse(format!("compressed envelope: {e}")))?;
+    let envelope: CompressionEnvelopeOwned =
+        serde_json::from_str(raw).map_err(|e| Error::Parse(format!("compressed envelope: {e}")))?;
     if envelope.schema_version != DEFAULT_PROTOCOL_SCHEMA_VERSION {
         return Err(Error::Parse(format!(
             "unsupported compressed schema_version={} expected={DEFAULT_PROTOCOL_SCHEMA_VERSION}",
@@ -219,7 +219,10 @@ pub fn normalize_payload_json<'a>(raw: &'a str) -> Result<Cow<'a, str>> {
     }
 
     let codec = CompressionCodec::from_name(&envelope.codec).ok_or_else(|| {
-        Error::Parse(format!("unsupported compression codec '{}'", envelope.codec))
+        Error::Parse(format!(
+            "unsupported compression codec '{}'",
+            envelope.codec
+        ))
     })?;
     let decompressed = decompress(envelope.data.as_ref(), codec)?;
     if decompressed.len() != envelope.original_len as usize {
@@ -323,10 +326,7 @@ impl RenderFrame {
         Self::from_normalized_payload_with_defaults(&normalized, defaults)
     }
 
-    pub fn from_normalized_payload_with_defaults(
-        raw: &str,
-        defaults: Defaults,
-    ) -> Result<Self> {
+    pub fn from_normalized_payload_with_defaults(raw: &str, defaults: Defaults) -> Result<Self> {
         let payload: Payload =
             serde_json::from_str(raw).map_err(|e| Error::Parse(format!("json: {e}")))?;
 
