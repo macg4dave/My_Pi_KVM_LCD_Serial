@@ -6,7 +6,6 @@ pub mod command_tunnel;
 pub mod negotiation;
 pub mod polling;
 pub mod schema;
-pub mod serialsh;
 pub mod transfer;
 
 // The milestone modules are intentionally minimal by default and don't alter the core

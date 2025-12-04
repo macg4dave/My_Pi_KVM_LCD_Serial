@@ -20,6 +20,7 @@ pub const BAR_FULL: char = BAR_LEVELS[5];
 pub const HEARTBEAT_CHAR: char = '\u{6}';
 pub const BATTERY_CHAR: char = '\u{7}';
 pub const CGRAM_FREE_CHAR: char = BATTERY_CHAR;
+pub const WIFI_CHAR: char = 'w';
 
 #[cfg(target_os = "linux")]
 const BAR_GLYPHS: [[&str; 8]; 8] = [

@@ -121,6 +121,31 @@ Note for builders: the included `Makefile` and `scripts/local-release.sh` will p
 
 LifelineTTY listens for **one JSON object per line** over a serial port.
 
+
+### Icons and overlays
+
+LifelineTTY ships with a few built-in icons so you can decorate alerts and
+status lines without manually loading custom CGRAM entries. Supply an
+`icons` array in your payload and the daemon overlays each glyph in the first
+available slot on the second line. Supported icon names today are
+`"battery"`, `"heart"`, `"arrow"`, and `"wifi"`; unrecognized names are
+silently ignored.
+
+The `"wifi"` icon simply renders the lowercase `w` character, making it
+compatible with every HD44780 font while still conveying topology status. For a
+full catalog of byte patterns, see
+[`docs/icon_library.md`](docs/icon_library.md).
+
+Strict mode (enabled by including `schema_version`) also rejects payloads that
+contain fields the current schema does not define. Keep keys tidy—typos like
+`"icon"` instead of `"icons"` or extra fields copied from other dashboards
+will trigger a validation error and drop the frame.
+
+```json
+{"schema_version":1,"line1":"Wi-Fi","line2":"Icons!","icons":["wifi","battery"]}
+```
+
+
 ### Schema versioning and strict mode
 
 You must include a `schema_version` field to enable strict validation rules (for future-proofing and compatibility): missing `schema_version` will cause the payload to be rejected.
@@ -132,6 +157,7 @@ Starting with this release, every JSON payload must include `schema_version`. If
 ```json
 {"schema_version":1,"line1":"Hello","line2":"World"}
 ```
+
 Examples:
 
 ### Simple text
@@ -265,19 +291,18 @@ Reload config without restarting the daemon:
 | `--log-level <error\|warn\|info\|debug\|trace>` | Verbosity for stderr/file logs. | `info` (also configurable via `LIFELINETTY_LOG_LEVEL`). |
 | `--log-file <path>` | Append logs to a file inside `/run/serial_lcd_cache` (also honors `LIFELINETTY_LOG_PATH`). | No file logging unless you provide a cache-rooted path. |
 | `--demo` | Run built-in demo pages to validate wiring—no serial input required. | Disabled by default. |
-| `--serialsh` | **Preview (feature `serialsh-preview`)**: enable the upcoming serial shell mode. | Feature-gated placeholder; currently exits with a roadmap reminder until Milestone A lands. |
+| `--serialsh` | **Preview (feature `serialsh-preview`)**: open the interactive serial shell that sends one-line commands through the tunnel and streams remote stdout/stderr plus the exit code. | Hidden behind the preview feature; releases omit the flag to keep automation stable. |
 | `--help` / `--version` | Display usage or the crate version. | Utility flags that never touch hardware. |
 
-> **Preview builds only:** compile with `cargo run --features serialsh-preview -- --run --serialsh` to exercise the gated flag. Official releases omit the flag entirely so existing automation stays stable.
+- **Preview builds only:** compile with `cargo run --features serialsh-preview -- --run --serialsh` to exercise the gated flag. Official releases omit the flag entirely so existing automation stays stable.
+
+> 💡 **Milestone A (P7/P8) shipped:** the `serialsh-preview` feature now powers a full serial shell client that leverages the Milestone A tunnel (commands, stdout/stderr chunks, and remote exit codes). Keep the flag hidden in production, but feel free to try the interactive session on preview builds.
 
 ### Serial precedence cheatsheet
 
-- CLI flags (`--device`, `--baud`) always win for the current process.
 - If a flag is omitted, the daemon falls back to `~/.serial_lcd/config.toml`.
 - When both CLI and config omit a setting, the built-in defaults apply: `/dev/ttyUSB0` @ 9600 8N1, 20×4 LCD.
 - Alternate Linux UARTs like `/dev/ttyAMA0`, `/dev/ttyS0`, or USB adapters work equally well—point the CLI flag or config entry at the path you need.
-
-> 💡 **Serial shell preview (P7)**: The `serialsh` Cargo feature only enables argument parsing plus a friendly “not yet wired” error so we can stage Milestone A. Default release builds keep the flag hidden; don’t rely on it for production until the command tunnel is complete.
 
 ---
 

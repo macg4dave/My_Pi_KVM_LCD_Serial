@@ -192,6 +192,7 @@ Update this section or `docs/createstocheck.md` whenever priorities shift so the
 - **Scope**: `src/payload/icons.rs`, `src/display/lcd.rs`, `src/app/render_loop.rs`, `src/config/loader.rs`, `docs/icon_library.md`, `samples/payload_examples.json`, and `tests/*`.
 - **Dependencies**: P22 (custom characters) with supporting helpers from P21 (hd44780-driver CGRAM plumbing).
 - **Constraints**: Respect 8-slot CGRAM limit, <5 MB RSS, keep icon assets embedded in the binary or config; logging/cache writes stay inside `/run/serial_lcd_cache`.
+- **Current status:** `icons` payloads can request one or more of `battery`, `heart`, `arrow`, and `wifi`. Unknown names are ignored so legacy dashboards never crash the render loop.
 - **Workflow**:
   1. Import the public-domain glyphs from `duinoWitchery/hd44780` into a Rust icon registry plus a Markdown catalog with attribution.
   2. Build a CGRAM bank manager that stages icons ahead of each render pass, reuses existing slots, and falls back predictably when >8 glyphs requested.

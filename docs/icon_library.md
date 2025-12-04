@@ -50,3 +50,16 @@ These glyphs represent a vertical RSSI-style bar graph. Slot `0` is blank; slot 
 - Each row byte maps directly to HD44780 CGRAM rows (bit 0 = leftmost pixel). Keep strings ≤16 columns and remember that the controller exposes only eight custom slots (`0x00`–`0x07`).
 - When embedding these icons in payloads today, use octal escapes (`"\\000"` → slot 0). Milestone H will provide semantic names so operators can avoid manual escapes.
 - If you add new icons, update this file **and** the corresponding Rust registry; tests introduced with Milestone H will assert that both stay in sync.
+
+## Overlay icon names
+
+LifelineTTY also recognizes a short list of semantic icons that can be overlaid via the `icons` payload field. At the time of writing the list is:
+
+| Icon name | Notes |
+|-----------|-------|
+| `battery` | Uses the `0x07` custom slot defined above (`BATTERY_CHAR`). |
+| `heart` | Uses the `0x06` slot (`HEARTBEAT_CHAR`). |
+| `arrow` | Draws the `down_arrow` glyph from the catalog. |
+| `wifi` | Renders the lowercase `w` character; no custom slot is required. |
+
+Include the names directly in your payload (e.g., `{ "schema_version":1, "icons":["wifi","battery"] }`). Unknown names are ignored, so misspelling `"icon"` or `"batery"` will simply omit the glyph from the render pass.

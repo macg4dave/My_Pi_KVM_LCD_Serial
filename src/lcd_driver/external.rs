@@ -6,6 +6,7 @@ use crate::{Error, Result};
 use {
     crate::lcd_driver::pcf8574,
     embedded_hal::blocking::{delay::DelayUs, i2c::Write},
+    embedded_hal_1::i2c::{I2c as EmbeddedHal1I2c, SevenBitAddress},
     hd44780_driver::{
         bus::{DataBus, I2CBus},
         Cursor, CursorBlink, HD44780,
@@ -316,7 +317,7 @@ impl AdapterState {
                 bus.block_write(*first, rest).map_err(pcf8574::map_i2c_err)
             }
             AdapterBackend::I2cdev(dev) => {
-                <I2cdev as embedded_hal::blocking::i2c::Write>::write(dev, addr.into(), bytes)
+                EmbeddedHal1I2c::<SevenBitAddress>::write(dev, addr.into(), bytes)
                     .map_err(pcf8574::map_i2cdev_err)
             }
             #[cfg(test)]

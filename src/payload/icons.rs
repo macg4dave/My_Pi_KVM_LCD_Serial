@@ -12,6 +12,7 @@ pub enum Icon {
     Battery,
     Arrow,
     Heart,
+    Wifi,
 }
 
 pub(crate) fn parse_display_mode(raw: Option<String>) -> DisplayMode {
@@ -29,6 +30,7 @@ pub(crate) fn parse_icons(raw: Option<Vec<String>>) -> Vec<Icon> {
             "battery" => Some(Icon::Battery),
             "arrow" => Some(Icon::Arrow),
             "heart" => Some(Icon::Heart),
+            "wifi" => Some(Icon::Wifi),
             _ => None,
         })
         .collect()

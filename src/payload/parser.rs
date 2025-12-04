@@ -12,7 +12,7 @@ pub struct Defaults {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct Payload {
     pub line1: String,
     pub line2: String,

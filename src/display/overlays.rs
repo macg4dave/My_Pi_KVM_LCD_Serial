@@ -2,7 +2,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::{
-    display::lcd::{Lcd, BAR_LEVELS, BATTERY_CHAR, HEARTBEAT_CHAR},
+    display::lcd::{Lcd, BAR_LEVELS, BATTERY_CHAR, HEARTBEAT_CHAR, WIFI_CHAR},
     payload::{Icon, RenderFrame},
     Error, Result,
 };
@@ -218,6 +218,7 @@ fn overlay_icons(
         Icon::Battery => BATTERY_CHAR,
         Icon::Arrow => '>',
         Icon::Heart => HEARTBEAT_CHAR,
+        Icon::Wifi => WIFI_CHAR,
     };
     let mut chars: Vec<char> = target.chars().collect();
     if chars.len() < width {

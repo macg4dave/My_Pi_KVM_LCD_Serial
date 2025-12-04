@@ -38,7 +38,7 @@ Provide an opt-in CLI front-end that lets an operator run individual commands th
 
 ### 2. Serial connection + negotiation bootstrap
 
-* Reuse `src/app/connection.rs::SerialConnectionBuilder` (introduced for Milestone A) so serialsh shares retry/backoff policies.
+* Reuse the connection/backoff helpers introduced in `src/app/connection.rs` so serialsh shares the same retry strategy as the daemon.
 * After open, run the Milestone B capability exchange; abort with a friendly message if the command tunnel bit is absent or times out. Ensure logs go to stderr and `/run/serial_lcd_cache/serialsh.log` if logging to file is required.
 
 ### 3. Command loop façade

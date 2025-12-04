@@ -8,12 +8,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(crate) struct SerialConnection {
-    pub port: SerialPort,
-    pub initial_frame: Option<String>,
-    pub negotiated_role: Role,
-}
-
 struct NegotiationResult {
     role: Role,
     pending_frame: Option<String>,
@@ -24,12 +18,12 @@ const NEGOTIATION_TIMEOUT_MS: u64 = 500;
 const NEGOTIATION_NODE_ID: u32 = 42;
 const NEGOTIATION_PROTO_VERSION: u8 = 1;
 
-/// Attempt to open the serial port and send the INIT handshake, logging outcomes.
+/// Attempt to open the serial port, send the INIT handshake, and log outcomes.
 pub(crate) fn attempt_serial_connect(
     logger: &Logger,
     device: &str,
     options: SerialOptions,
-) -> Option<SerialConnection> {
+) -> Option<SerialPort> {
     match SerialPort::connect(device, options) {
         Ok(mut serial_connection) => {
             if let Err(err) = serial_connection.send_command_line("INIT") {
@@ -46,11 +40,7 @@ pub(crate) fn attempt_serial_connect(
                     negotiation.role.as_str()
                 ));
             }
-            Some(SerialConnection {
-                port: serial_connection,
-                initial_frame: negotiation.pending_frame,
-                negotiated_role: negotiation.role,
-            })
+            Some(serial_connection)
         }
         Err(err) => {
             logger.warn(format!("serial connect failed: {err}; will retry"));
@@ -162,4 +152,88 @@ enum ControlFrame {
 #[derive(Deserialize)]
 struct ControlCaps {
     bits: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::logger::{LogLevel, Logger};
+    use crate::serial::LineIo;
+    use std::collections::VecDeque;
+
+    struct FakeLineIo {
+        responses: VecDeque<String>,
+        sent: Vec<String>,
+    }
+
+    impl FakeLineIo {
+        fn with_responses(responses: Vec<&str>) -> Self {
+            Self {
+                responses: responses
+                    .into_iter()
+                    .map(String::from)
+                    .collect::<VecDeque<_>>(),
+                sent: Vec::new(),
+            }
+        }
+
+        fn sent(&self) -> &[String] {
+            &self.sent
+        }
+    }
+
+    impl LineIo for FakeLineIo {
+        fn send_command_line(&mut self, line: &str) -> crate::Result<()> {
+            self.sent.push(line.to_string());
+            Ok(())
+        }
+
+        fn read_message_line(&mut self, buf: &mut String) -> crate::Result<usize> {
+            if let Some(line) = self.responses.pop_front() {
+                buf.clear();
+                buf.push_str(&line);
+                Ok(line.len())
+            } else {
+                Ok(0)
+            }
+        }
+    }
+
+    fn new_logger() -> Logger {
+        Logger::new(LogLevel::Debug, None).expect("logger init")
+    }
+
+    #[test]
+    fn negotiation_success_sets_role() {
+        let ack = r#"{"type":"hello_ack","chosen_role":"client","peer_caps":{"bits":3}}"#;
+        let mut io = FakeLineIo::with_responses(vec![ack]);
+        let logger = new_logger();
+        let result = negotiate_handshake(&mut io, &logger);
+        assert!(!result.fallback);
+        assert_eq!(result.role, Role::Client);
+        assert!(io
+            .sent()
+            .iter()
+            .any(|line| line.contains("\"type\":\"hello\"")));
+    }
+
+    #[test]
+    fn negotiation_legacy_fallback_sets_flag() {
+        let fallback = r#"{"type":"legacy_fallback"}"#;
+        let mut io = FakeLineIo::with_responses(vec![fallback]);
+        let logger = new_logger();
+        let result = negotiate_handshake(&mut io, &logger);
+        assert!(result.fallback);
+        assert!(result.pending_frame.is_none());
+    }
+
+    #[test]
+    fn negotiation_unknown_frame_promotes_fallback_with_frame() {
+        let unknown = r#"{"custom":"payload"}"#;
+        let mut io = FakeLineIo::with_responses(vec![unknown]);
+        let logger = new_logger();
+        let result = negotiate_handshake(&mut io, &logger);
+        assert!(result.fallback);
+        assert_eq!(result.pending_frame.as_deref(), Some(unknown));
+    }
 }

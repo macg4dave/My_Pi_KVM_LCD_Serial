@@ -37,6 +37,7 @@ Milestone F keeps the current framing (newline-delimited JSON) but wraps it in 
 
 - Define a `ProtocolFrame` enum with variants for display frames (current `RenderFrame`), file chunk manifests (P10), control messages, and the new compression envelope. Embed a `schema_version: u8` and `frame_type` string in the serialized form.
 -- Teach `RenderFrame::from_payload_json_with_defaults` to require `schema_version` and enforce version `1` rules: `line1/line2` length caps, icon counts ≤ 4, bar labels bounded to display width, etc.
+- Whitelist the semantic icon names currently recognized by `src/payload/icons.rs` (`battery`, `heart`, `arrow`, `wifi`) so the deserializer can reject typos when `icons` is present.
 - Introduce manual bounds helpers (max string length, array len, numeric ranges). Violations map to `Error::Parse(String)` with concise wording so CLI logs remain readable.
 - Update `samples/payload_examples.json` and `docs/lcd_patterns.md` with schema-versioned fixtures to help operators craft valid frames.
 - Extend unit tests in `src/payload/parser.rs` to cover version parsing, default fallback, bounds enforcement, and checksum validation with the new canonical serialization (checksum excludes the compression envelope when present).
@@ -99,6 +100,9 @@ Milestone F keeps the current framing (newline-delimited JSON) but wraps it in 
 ```json
 // Schema v1 display payload
 {"schema_version":1,"line1":"HELLO","line2":"WORLD","icons":["battery"]}
+
+// Schema v1 payload showing multiple icons (wifi + battery)
+{"schema_version":1,"line1":"Wi-Fi OK","line2":"Signal","icons":["wifi","battery"]}
 
 // Compressed LZ4 envelope carrying a schema v1 display payload
 {

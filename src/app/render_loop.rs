@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::connection::{attempt_serial_connect, BackoffController};
+use super::connection::attempt_serial_connect;
 use super::events::ScrollOffsets;
 use super::input::Button;
 use super::lifecycle::{create_shutdown_flag, render_shutdown};
@@ -25,6 +25,7 @@ use crate::{
         TunnelMsgOwned,
     },
     serial::{
+        backoff::BackoffController,
         telemetry::{log_backoff_event, BackoffPhase},
         SerialPort,
     },
