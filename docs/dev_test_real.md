@@ -66,7 +66,7 @@ Terminal names/titles are explicit (SSH, Remote, Local) so you never confuse the
    * Ensure all referenced files exist locally (binary, config, payloads).
    * Verify `lifelinetty.service` is stopped on the Pi to free the UART.
 2. **Local build**
-   * Run `cargo build` (debug or release, based on config).
+   * Run `BUILD_CMD` (defaults to `make all`, which produces release binaries under `releases/debug/<arch>/lifelinetty`).
    * Fail fast on compile errors.
 3. **Binary sync**
    * Create the remote directory if missing.

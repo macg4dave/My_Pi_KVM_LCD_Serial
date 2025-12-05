@@ -72,8 +72,10 @@ Edit dev.conf:
 - Build command:
 
   ```bash
-  BUILD_CMD="cargo build"
+  BUILD_CMD="make all"
   ```
+
+  This default runs `make all` so that each architecture’s release binary lands under `releases/debug/<arch>/lifelinetty`. Override with `BUILD_CMD="cargo build"` if you only need the host debug build.
 
 - Terminal emulator:
 
@@ -180,8 +182,10 @@ it performs:
 1. **Build locally**
 
    - Runs `BUILD_CMD` via `bash -c "$BUILD_CMD"`.
-     - Default: `cargo build`.
-   - Warns if `LOCAL_BIN` doesn’t exist or isn’t executable afterwards.
+     - Default: `make all`, which writes every architecture’s release binary into `releases/debug/<arch>/lifelinetty`.
+     - Set `LOCAL_ARCH`/`REMOTE_ARCH` (or `LOCAL_BIN_SOURCE`/`REMOTE_BIN_SOURCE`) to point the loop at the binaries you want to deploy.
+     - Override with `BUILD_CMD="cargo build"` if you just need the host debug build to stay lightweight.
+   - Warns if `LOCAL_BIN_SOURCE` doesn’t exist or isn’t executable afterwards.
 
 1. **Pre-flight remote**
 
@@ -193,8 +197,7 @@ it performs:
 
 1. **Binary sync**
 
-   - Copies `LOCAL_BIN` up to `PI_BIN` via `scp`.
-   - Runs `chmod +x "$PI_BIN"` remotely.
+  Copies `LOCAL_BIN_SOURCE` up to `PI_BIN` via `scp` and then runs `chmod +x "$PI_BIN"` on the Pi to ensure execute permissions.
 
 1. **Remote cleanup**
 
@@ -212,7 +215,7 @@ it performs:
    - Local (ensuring it uses the temp HOME):
 
      ```bash
-     LOCAL_CMD="HOME=$LOCAL_CONFIG_HOME LIFELINETTY_LOG_PATH=/run/serial_lcd_cache/milestone1/<scenario>-YYYYMMDD/local/lifelinetty-local.log $LOCAL_BIN $COMMON_ARGS $LOCAL_ARGS"
+     LOCAL_CMD="HOME=$LOCAL_CONFIG_HOME LIFELINETTY_LOG_PATH=/run/serial_lcd_cache/milestone1/<scenario>-YYYYMMDD/local/lifelinetty-local.log $LOCAL_BIN_SOURCE $COMMON_ARGS $LOCAL_ARGS"
      ```
 
    - Logs:
@@ -320,7 +323,7 @@ PI_HOST=lifelinetty-remote
 PI_USER=root
 PI_BIN=/opt/lifelinetty/lifelinetty
 COMMON_ARGS="--demo --cols 16 --rows 2"
-BUILD_CMD="cargo build"
+BUILD_CMD="make all"
 TERMINAL_CMD=""               # headless
 ENABLE_SSH_SHELL=false         # skip SSH pane
 EOF
@@ -344,6 +347,7 @@ Override knobs:
 - `TERMINAL_CMD_OVERRIDE=<cmd>`: force a terminal even inside containers.
 - `ENABLE_SSH_SHELL_OVERRIDE=true`: re-enable SSH pane in headless/container runs.
 - `LOCAL_BIN_SOURCE` / `REMOTE_BIN_SOURCE`: point to prebuilt binaries (e.g., `releases/debug/armv6/lifelinetty`).
+- `LOCAL_ARCH` / `REMOTE_ARCH`: tell the script which release artifacts under `releases/debug/<arch>/lifelinetty` to deploy. `LOCAL_ARCH` defaults to your host if unset, and the loop mirrors that binary to the Pi unless `REMOTE_ARCH` is set.
 - `SCENARIO_NAME` / `SCENARIO_DATE`: tag multiple runs in the shared cache.
 
 All other settings from the desktop flow still apply (config templates, `REMOTE_ARGS`/`LOCAL_ARGS`, etc.).

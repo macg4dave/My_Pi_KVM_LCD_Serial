@@ -104,7 +104,7 @@ REMOTE_BIN_SOURCE=${REMOTE_BIN_SOURCE:-}
 COMMON_ARGS=${COMMON_ARGS:-run --baud 9600 --cols 16 --rows 2}
 REMOTE_ARGS=${REMOTE_ARGS:-}
 LOCAL_ARGS=${LOCAL_ARGS:-}
-BUILD_CMD=${BUILD_CMD:-cargo build}
+BUILD_CMD=${BUILD_CMD:-make all}
 ENABLE_LOG_PANE=${ENABLE_LOG_PANE:-false}
 LOG_WATCH_CMD=${LOG_WATCH_CMD:-"watch -n 0.5 ls -lh $SCENARIO_DIR"}
 PKILL_PATTERN=${PKILL_PATTERN:-lifelinetty}
@@ -120,6 +120,41 @@ resolve_path() {
         printf '%s/%s' "$SCRIPT_DIR" "$p"
     fi
 }
+
+LOCAL_BIN=$(resolve_path "$LOCAL_BIN")
+if [[ -n "${LOCAL_BIN_SOURCE:-}" ]]; then
+    LOCAL_BIN_SOURCE=$(resolve_path "$LOCAL_BIN_SOURCE")
+fi
+if [[ -n "${REMOTE_BIN_SOURCE:-}" ]]; then
+    REMOTE_BIN_SOURCE=$(resolve_path "$REMOTE_BIN_SOURCE")
+fi
+
+map_machine_to_release_arch() {
+    case "$1" in
+        x86_64|amd64|i[3-6]86)
+            printf 'x86'
+            ;;
+        armv6l)
+            printf 'armv6'
+            ;;
+        armv7l)
+            printf 'armv7'
+            ;;
+        aarch64|arm64)
+            printf 'arm64'
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+if [[ -z "${LOCAL_ARCH:-}" ]]; then
+    host_arch=$(map_machine_to_release_arch "$(uname -m)" 2>/dev/null || true)
+    if [[ -n "$host_arch" ]]; then
+        LOCAL_ARCH="$host_arch"
+    fi
+fi
 
 CONFIG_SOURCE_FILE=$(resolve_path "${CONFIG_SOURCE_FILE:-config/local/default.toml}")
 LOCAL_CONFIG_SOURCE_FILE=$(resolve_path "${LOCAL_CONFIG_SOURCE_FILE:-$CONFIG_SOURCE_FILE}")
@@ -159,21 +194,30 @@ printf '[BUILD] Using "%s"\n' "$BUILD_CMD"
 bash -c "$BUILD_CMD"
 
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+RELEASE_ROOT=${RELEASE_ROOT:-"$REPO_ROOT/releases/debug"}
 
-if [[ -n "$LOCAL_ARCH" ]]; then
-    LOCAL_BIN_SOURCE="$REPO_ROOT/releases/debug/$LOCAL_ARCH/lifelinetty"
-fi
+release_bin_path() {
+    local arch="$1"
+    if [[ -z "$arch" ]]; then
+        return 1
+    fi
+    printf '%s' "$RELEASE_ROOT/$arch/lifelinetty"
+}
 
 if [[ -z "$LOCAL_BIN_SOURCE" ]]; then
-    LOCAL_BIN_SOURCE="$LOCAL_BIN"
-fi
-
-if [[ -n "$REMOTE_ARCH" ]]; then
-    REMOTE_BIN_SOURCE="$REPO_ROOT/releases/debug/$REMOTE_ARCH/lifelinetty"
+    if [[ -n "$LOCAL_ARCH" ]]; then
+        LOCAL_BIN_SOURCE=$(release_bin_path "$LOCAL_ARCH")
+    else
+        LOCAL_BIN_SOURCE="$LOCAL_BIN"
+    fi
 fi
 
 if [[ -z "$REMOTE_BIN_SOURCE" ]]; then
-    REMOTE_BIN_SOURCE="$LOCAL_BIN"
+    if [[ -n "$REMOTE_ARCH" ]]; then
+        REMOTE_BIN_SOURCE=$(release_bin_path "$REMOTE_ARCH")
+    else
+        REMOTE_BIN_SOURCE="$LOCAL_BIN_SOURCE"
+    fi
 fi
 
 if [[ ! -x "$LOCAL_BIN_SOURCE" ]]; then

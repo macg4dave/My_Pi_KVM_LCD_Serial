@@ -35,9 +35,10 @@ COMMON_ARGS="--run --device /dev/ttyUSB0 --baud 9600 --cols 16 --rows 2"
 REMOTE_ARGS=""
 LOCAL_ARGS=""
 
-# Command used for building before deployment. Override if you
-# prefer release builds or cross compilation.
-BUILD_CMD="cargo build"
+# Command used for building before deployment. Defaults to `make all`
+# so the release binaries end up under releases/debug/<arch>/lifelinetty.
+# Override with `cargo build` if you only need a host build and want a faster loop.
+BUILD_CMD="make all"
 
 "# Terminal program used to open SSH/remote/local/log windows (needs to support --title and -- bash -lc).
 # Set TERMINAL_CMD="" for headless/container runs; the script will background the commands instead.

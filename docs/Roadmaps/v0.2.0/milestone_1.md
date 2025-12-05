@@ -173,7 +173,7 @@ When asked to rerun or debug:
 
 1. Ensure cache mount exists: `ls -l /run/serial_lcd_cache` (inside each container).
 2. Verify SSH: `ssh -o BatchMode=yes -p 22 root@remote true` (or port 2222 if mapped).
-3. Rebuild if needed: `cargo build` (or rely on `LOCAL_BIN_SOURCE`).
+3. Rebuild if needed: run whatever `BUILD_CMD` you configured (default `make all`, which writes `releases/debug/<arch>/lifelinetty` for each target). You can also point `LOCAL_BIN_SOURCE`/`REMOTE_BIN_SOURCE` at an existing release artifact if you skip the build step.
 4. Run the loop headless: `TERMINAL_CMD="" ./devtest/run-dev.sh` with correct envs.
 5. Fetch logs: `docker cp lifelinetty-remote:/run/serial_lcd_cache ./cache-copy` (or from local if shared bind).
 6. Inspect key logs: `serial_backoff.log`, `watchdog.log`, scenario folder under `milestone1/`.
