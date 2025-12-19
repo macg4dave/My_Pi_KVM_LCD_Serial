@@ -36,8 +36,14 @@ fn write_default_test_config(home: &PathBuf, extra: &str) {
     fs::write(path, format!("{base}{extra}")).unwrap();
 }
 
-fn open_pty_pair() -> (File, String) {
-    let master = rustix::pty::openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).unwrap();
+fn open_pty_pair() -> Option<(File, String)> {
+    let master = match rustix::pty::openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY) {
+        Ok(master) => master,
+        Err(err) => {
+            eprintln!("skipping PTY test: openpt failed ({err})");
+            return None;
+        }
+    };
     rustix::pty::grantpt(&master).unwrap();
     rustix::pty::unlockpt(&master).unwrap();
 
@@ -47,7 +53,7 @@ fn open_pty_pair() -> (File, String) {
     let raw = master.into_raw_fd();
     let master_file = unsafe { File::from_raw_fd(raw) };
 
-    (master_file, slave_path)
+    Some((master_file, slave_path))
 }
 
 fn spawn_line_reader(mut master: File) -> mpsc::Receiver<String> {
@@ -312,7 +318,9 @@ fn pty_spawn_serialsh_tunnel_round_trip() {
     // Roadmap alignment: extends test coverage of real IO over a pseudo-serial link
     // (helps validate tunnel framing end-to-end).
 
-    let (master, slave_path) = open_pty_pair();
+    let Some((master, slave_path)) = open_pty_pair() else {
+        return;
+    };
     let rx = spawn_line_reader(master.try_clone().unwrap());
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_lifelinetty"))
@@ -401,7 +409,10 @@ fn pty_spawn_daemon_handshake_payload_and_command_frames() {
         "command_allowlist = [\"true\"]\npolling_enabled = false\n",
     );
 
-    let (master, slave_path) = open_pty_pair();
+    let Some((master, slave_path)) = open_pty_pair() else {
+        let _ = fs::remove_dir_all(&home);
+        return;
+    };
     let rx = spawn_line_reader(master.try_clone().unwrap());
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_lifelinetty"))

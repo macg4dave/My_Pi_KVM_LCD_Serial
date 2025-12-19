@@ -179,7 +179,7 @@ impl FirstRunWizard {
             .first()
             .cloned()
             .unwrap_or_else(|| DEFAULT_DEVICE.to_string());
-        println!("\nDetected serial devices:");
+        println!("\nDetected serial devices (ranked):");
         if candidates.is_empty() {
             println!("  (none discovered under /dev; enter a full path manually)");
         } else {
@@ -283,7 +283,13 @@ struct WizardAnswers {
     show_helpers: bool,
 }
 
-fn run_probes(device: &str, target_baud: u32) -> Vec<ProbeResult> {
+fn run_probes_with_backoff(
+    device: &str,
+    target_baud: u32,
+    backoff_initial_ms: u64,
+    backoff_max_ms: u64,
+    attempts: u8,
+) -> Vec<ProbeResult> {
     let mut rates = vec![MIN_BAUD];
     if target_baud != MIN_BAUD {
         rates.push(target_baud);
@@ -844,15 +850,20 @@ fn prompt_role(prompter: &mut WizardPrompter, default: RolePreference) -> Result
     let default_label = match default {
         RolePreference::PreferServer => "server",
         RolePreference::PreferClient => "client",
-        RolePreference::NoPreference => "auto",
+        RolePreference::NoPreference => "standalone",
     };
     loop {
-        let response = prompter.prompt("Preferred role (server/client/auto)", default_label)?;
+        let response = prompter.prompt(
+            "Preferred role (server/client/standalone/auto)",
+            default_label,
+        )?;
         match response.trim().to_ascii_lowercase().as_str() {
             "server" => return Ok(RolePreference::PreferServer),
             "client" => return Ok(RolePreference::PreferClient),
-            "auto" | "none" => return Ok(RolePreference::NoPreference),
-            other => eprintln!("Unknown role '{other}', choose server, client, or auto."),
+            "standalone" | "auto" | "none" => return Ok(RolePreference::NoPreference),
+            other => eprintln!(
+                "Unknown role '{other}', choose server, client, standalone, or auto."
+            ),
         }
     }
 }
@@ -895,5 +906,30 @@ mod tests {
         assert_eq!(cfg.cols, 16);
         assert_eq!(cfg.rows, 2);
         assert_eq!(cfg.negotiation.preference, RolePreference::PreferClient);
+    }
+
+    #[test]
+    fn ranks_devices_by_likelihood() {
+        let mut devices = vec![
+            "/dev/ttyS0".to_string(),
+            "/dev/ttyUSB1".to_string(),
+            "/dev/ttyAMA0".to_string(),
+            "/dev/ttyUSB0".to_string(),
+            "/dev/ttyACM0".to_string(),
+        ];
+        rank_serial_devices(&mut devices);
+        assert_eq!(
+            devices,
+            vec![
+                "/dev/ttyUSB0",
+                "/dev/ttyUSB1",
+                "/dev/ttyACM0",
+                "/dev/ttyAMA0",
+                "/dev/ttyS0"
+            ]
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+        );
     }
 }

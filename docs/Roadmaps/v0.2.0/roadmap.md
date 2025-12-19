@@ -15,9 +15,34 @@ This is an **execution document**, not a wish list.
   - Cache policy: `.github/copilot-instructions.md` + `CACHE_DIR` constant in code
   - Payload contract: `src/payload/` (especially `src/payload/parser.rs`)
 
+## At a glance (v0.2.0)
+
+- **Ship intent:** debug + harden existing behavior; expand tests; complete real hardware field trials (no new transports/flags).
+- **Where we are:** P1 ✅; P2–P4 🔵; Milestone 1 ✅; Milestone 2–4 planned; Milestone 5 ✅.
+- **Next execution steps (ordered):**
+  1. Close **P2 / P2a** by removing LCD/icon fallbacks and updating `README.md`, demo payloads, and tests.
+  2. Close **P3** by asserting serial backoff telemetry mappings and cache-log placement/rotation limits.
+  3. Close **P4** by adding time-budgeted tests for polling/watchdog overlap during reconnect/backoff.
+- **Field trial minimum (to call v0.2.0 “trial-ready”):** Baseline + Alt TTY + LCD stress + Permission denied + Unplug/replug completed on Pi 1, each with a dated cache bundle and either a passing regression test or a filed defect.
+
+### Status legend
+
+- **✅ closed:** blocker eliminated; keep guardrails warm.
+- **🟢 Done:** merged; acceptance checks reproducible.
+- **🔵 Open:** in scope but not yet completed (may be partially implemented).
+- **🔴 Active:** currently being executed; expect follow-up PRs.
+- **(--Planned):** documented intent only (no code merged).
+
+### Tracking links (v0.2.0)
+
+- Roadmap: `docs/Roadmaps/v0.2.0/roadmap.md`
+- Change log: `docs/Roadmaps/v0.2.0/changelog.md`
+- Milestones: `docs/Roadmaps/v0.2.0/milestone_1.md`
+- Ops playbooks: `docs/dev_test_real.md`, `docs/demo_playbook.md`, `docs/lcd_patterns.md`
+
 ### Hardware assumptions (v0.2.0)
 
-- **Primary LCD**: 16×2 HD44780 (PCF8574 @ 0x27).
+- **Primary LCD**: 16×2 HD44780 (PCF8574 @ 0x27).
 - **Configurability**: cols/rows are still configurable via config/CLI, but all tests and docs should assume 16×2 unless explicitly labeled as “alternate geometry”.
 
 ### Per-PR validation checklist (v0.2.0)
@@ -59,7 +84,7 @@ Every PR that changes runtime behavior should include:
 
 | ID | Status | Owner | Action (keep warm) | Acceptance checks |
 | --- | --- | --- | --- | --- |
-| **B1 — Rename fallout** | ✅ closed (2 Dec 2025) | Release | Re-scan `Makefile`, `packaging/`, `docker/`, `scripts/` for `seriallcd` strings before each release cut. | `ripgrep seriallcd` returns none; package names/units stay `lifelinetty`. |
+| **B1 — Rename fallout** | ✅ closed (2 Dec 2025) | Release | Re-scan `Makefile`, `packaging/`, `docker/`, `scripts/` for `seriallcd` strings before each release cut. | `rg seriallcd` (or `grep -R seriallcd .`) returns none; package names/units stay `lifelinetty`. |
 | **B2 — Charter sync** | ✅ closed | Eng | `.github/copilot-instructions.md` matches UART/LCD/cache rules; roadmap restates the same. | Doc diff vs charter shows no drift; CLI defaults remain `/dev/ttyUSB0@9600` 8N1. |
 | **B3 — Cache policy audit** | ✅ closed | Eng | Ensure logs/temp stay under `/run/serial_lcd_cache`; only `~/.serial_lcd/config.toml` persists. | `tests/bin_smoke.rs` + integration mock enforce paths; no CI leaks outside cache/config. |
 | **B4 — CLI docs/tests parity** | ✅ closed | Eng | Keep README/help tables aligned with `lifelinetty --help` (`src/cli.rs`); smoke tests cover help content and key precedence (e.g., `--config-file` behavior, env overrides) without requiring hardware. | `cargo test -p lifelinetty` smoke passes; smoke asserts core flags appear in help; README/roadmap/help text match. |
@@ -67,6 +92,8 @@ Every PR that changes runtime behavior should include:
 | **B6 — Release tooling sanity** | ✅ closed | Release | Packaging/Docker scripts emit only `lifelinetty_*`; no legacy symlinks. | `scripts/local-release.sh` outputs lifelinetty artifacts only; systemd units named `lifelinetty.service`. |
 
 > Keep the B1 sweep active before shipping anything in v0.2.0 to prevent `seriallcd` regressions.
+>
+> If any blocker re-opens, keep the table row short and link to the owning defect/PR from the “Action” column (details belong in the linked ticket or a dedicated subsection).
 
 ## v0.2.0 scope & goals
 
@@ -103,6 +130,43 @@ Focus: **Debug existing features, expand tests, and run real-world user trials**
 - No new CLI flags or protocol changes (tunnel/file transfer/negotiation stay as-is).
 - No new dependencies beyond the charter-approved set; do not remove existing ones without approval.
 - No new transports (network, BLE, PTY) or storage locations outside cache/config.
+
+## Priority ↔ milestone mapping (execution aid)
+
+This avoids “we shipped milestones but didn’t close priorities” drift.
+
+| Priority | What ships (concrete) | Where it lands | Evidence required to mark done |
+| --- | --- | --- | --- |
+| P2 (LCD driver regressions) | CGRAM churn/eviction tests, backlight/blink coverage, deterministic overlay rendering, updated 16×2 expectations | `src/display/**`, `src/lcd_driver/**`, `tests/**`, `docs/lcd_patterns.md` | `cargo test` + updated docs + at least one LCD-focused matrix bundle |
+| P2a (alpha: remove LCD/icon fallbacks) | No implicit ASCII/icon fallbacks; LCD init failure is explicit; docs/samples reflect missing-glyph behavior | `src/display/**`, `src/payload/icons.rs`, `samples/**`, `README.md` | Unit + integration tests prove deterministic missing-glyph behavior |
+| P3 (serial backoff telemetry) | Error mapping + counters deterministic; cache log placement + rotation asserted | `src/serial/**`, `tests/**` | Tests that simulate unplug/permission denied and assert cache log paths |
+| P4 (polling/heartbeat stability) | Render loop stays responsive during reconnect/backoff overlap; time-budgeted tests | `src/app/**`, `tests/**` | Tests enforce budgets; no flakes in repeated local runs |
+| Milestone 2–3 (wizard improvements) | Better first-run UX; optional link-speed rehearsal via prompts (no new flags) | `src/app/wizard.rs`, docs, tests | Scripted wizard tests + transcript/log path assertions |
+| Milestone 4 (serialsh under systemd) | Operator docs + checklists; no behavior change required | docs only | Docs updated + smoke still covers `--serialsh` help/usage |
+
+## Risk register (v0.2.0)
+
+| Risk | Impact | Early signal | Mitigation / owner |
+| --- | --- | --- | --- |
+| Timing-sensitive tests flake (polling/watchdog/backoff) | CI noise blocks merges | intermittent failures, long runtimes | Time-budgeted tests with deterministic clocks/fakes where possible (Core) |
+| ARMv6-only regressions | Field trials fail late | x86_64 OK; Pi 1 fails | Require at least one Pi 1 run per runtime PR (Rotation) |
+| LCD init variability / bus contention | False “dead device” reports | init fails sporadically | Make init errors explicit + docs for wiring/power triage (Display) |
+| UART adapter variability (FTDI/CH340/CP210x) | Missed framing/latency issues | works on one dongle only | Add at least one “alternate adapter” scenario; capture adapter VID/PID in logs (Field ops) |
+| Cache growth / unbounded logs | RAM pressure, RSS drift | cache directories balloon | Enforce rotation/limits and assert in tests where practical (Serial/Core) |
+
+## Defect intake & triage loop (field → test → fix)
+
+Field trials only create value if they convert to regressions.
+
+1. **Capture**: create a dated bundle under `/run/serial_lcd_cache/<scenario>-YYYYMMDD/` containing:
+   - exact command line(s) run
+   - config used (`--config-file` path or default note)
+   - payload set(s) used
+   - relevant logs (`serial_backoff/`, `watchdog/`, `polling/`, `tunnel/`, `wizard/`)
+2. **File**: open a defect with (a) bundle path, (b) hardware notes (Pi model, adapter chipset, LCD backpack address), (c) expected vs observed.
+3. **Reproduce**: add a failing unit/integration test (prefer `tests/integration_mock.rs` or the closest existing harness).
+4. **Fix**: land the code change + passing regression test in the same PR.
+5. **Close**: only close the defect once the regression test is merged and the scenario can be replayed.
 
 ## Workstreams
 
@@ -173,6 +237,10 @@ Focus: **Debug existing features, expand tests, and run real-world user trials**
 | Higher baud probe | Pi 1 Model A + `/dev/ttyUSB0` | 19200 8N1 (post-wizard) | 16×2 | demo payloads | No framing errors; heartbeat/watchdog stay green. |
 | LCD stress | Pi 1 Model A + I²C backpack | 9600 8N1 | 16×2 | icon-heavy samples | CGRAM swaps ≤8 icons; no display corruption; overlays render. |
 | Tunnel coexists | Pi 1 Model A + `/dev/ttyUSB0` | 9600 8N1 | 16×2 | command tunnel enabled via `--serialsh` | Busy/Exit codes correct; LCD continues rendering; cache logs under `tunnel/` only. |
+| Permission denied | Pi 1 Model A + `/dev/ttyUSB0` (no group perms) | 9600 8N1 | 16×2 | baseline samples | Error is classified; backoff engages; no crash; cache logs include permission category. |
+| Unplug/replug | Pi 1 Model A + `/dev/ttyUSB0` | 9600 8N1 | 16×2 | baseline samples | Clean reconnect; counters/logs deterministic; LCD keeps updating status/heartbeat. |
+| Alt adapter | Pi 1 Model A + `/dev/ttyUSB0` (CH340/CP210x) | 9600 8N1 | 16×2 | baseline + demo payloads | No framing regressions; latency within expected; log bundle includes adapter notes. |
+| Alt I²C addr (common) | Pi 1 Model A + backpack @ `0x3F` | 9600 8N1 | 16×2 | baseline samples | Either works when configured, or fails with explicit init error (no silent stub). |
 
 Record outcomes and defects in RAM-disk logs; reproduce with tests before closing.
 
@@ -180,6 +248,18 @@ Record outcomes and defects in RAM-disk logs; reproduce with tests before closin
 
 - Logs/artifacts live under `/run/serial_lcd_cache/{serial_backoff,watchdog,tunnel,wizard,polling,negotiation}`; never persist elsewhere. New log families must be added to this list and asserted in tests. Rotation limits for serial_backoff logs apply (see P3).
 - Owner: field-ops rotation. Exit when each scenario has a dated log bundle in cache plus a matching regression test (or a filed defect). Note which matrix scenario was run and where its artifacts live (e.g., `/run/serial_lcd_cache/<scenario>-YYYYMMDD`).
+
+## Performance & soak validation (field runs)
+
+The goal is to keep “<5 MB RSS” and “no busy loops” measurable during field trials.
+
+1. Start a run as usual (prefer a matrix scenario name).
+2. Create a bundle directory: `/run/serial_lcd_cache/perf/<scenario>-YYYYMMDD/`.
+3. Capture RSS periodically (examples):
+   - `pidof lifelinetty`
+   - `ps -o pid,rss,etime,cmd -p "$(pidof lifelinetty)"`
+   - `grep -E 'VmRSS|VmHWM|Threads' "/proc/$(pidof lifelinetty)/status"`
+4. Pass criteria for a 2h baseline: RSS stays <5 MB; no monotonic growth trend; no high-frequency log spam suggesting a busy loop.
 
 ## Testing & validation (per change)
 
@@ -191,9 +271,25 @@ Record outcomes and defects in RAM-disk logs; reproduce with tests before closin
 ## Out-of-scope reminders
 
 - No network/PTY/HTTP features; UART + LCD only.
-- Network for testing only via existing scripts; no runtime network code. e.g. SSH tunnels, client-server devlopment setups.
+- Network for testing only via existing scripts; no runtime network code. e.g. SSH tunnels, client-server development setups.
 - No writes outside `/run/serial_lcd_cache` and `~/.serial_lcd/config.toml`.
 - No new crates beyond the approved list (see `docs/lifelinetty_creates.md`).
+
+## Release readiness gate (v0.2.0)
+
+This is the “can we cut a v0.2.0 release candidate?” checklist.
+
+**Entry criteria (RC can be tagged when all true):**
+
+- Blockers B1–B6 are still ✅ closed (re-run the B1 sweep).
+- P1 is 🟢 Done; P2–P4 are 🟢 Done (or explicitly deferred with Eng + Release sign-off in the PR summary).
+- `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` pass on x86_64; ARMv6 run is reported (ran or skipped with reason).
+- Field trial minimum scenarios (listed in “At a glance”) have a dated cache bundle each.
+
+**Exit criteria (RC becomes “ship”):**
+
+- Any field-trial defects are either fixed with regression tests or explicitly carried as known-issues with mitigations documented.
+- README and playbooks match `lifelinetty --help` and current runtime behavior.
 
 ## Rollout & tracking
 
@@ -254,4 +350,3 @@ Record outcomes and defects in RAM-disk logs; reproduce with tests before closin
 - **Status:** Delivered. The CLI accepts `--config-file` across implicit/`run` invocations, bypasses the default config path when supplied, and still applies environment overrides and per-flag tweaks on top. Help/README/devtest docs reference the flag, and regression coverage in `tests/bin_smoke.rs` and `src/app/mod.rs` confirms precedence and default config non-creation.
 - **Logging & storage:** The flag only reads the provided file; persistent writes remain limited to `~/.serial_lcd/config.toml` and `/run/serial_lcd_cache`.
 - **Docs/tests:** `tests/bin_smoke.rs` exercises env override + default skip; new unit tests in `src/app/mod.rs` assert config-file precedence and CLI override behavior. `docs/dev_test_real.md` and `devtest/dev.conf.example` describe using the flag for scenarios.
-

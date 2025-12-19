@@ -299,12 +299,12 @@ mod tests {
     use super::*;
     use crate::cli::RunMode;
     use crate::config::Config;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use tempfile::tempdir;
 
     fn set_temp_home() -> std::path::PathBuf {
         let mut dir = std::env::temp_dir();
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
             .expect("time went backwards")
             .as_nanos();
         dir.push(format!("lifelinetty_app_test_home_{stamp}"));
@@ -315,9 +315,11 @@ mod tests {
 
     #[test]
     fn config_from_options() {
-        let home = set_temp_home();
+        let dir = tempdir().unwrap();
+        let config_file = dir.path().join("config.toml");
         let mut opts = RunOptions::default();
         opts.mode = RunMode::Daemon;
+        opts.config_file = Some(config_file.to_string_lossy().to_string());
         opts.device = Some("/dev/ttyUSB1".into());
         opts.baud = Some(57_600);
         opts.cols = Some(16);
@@ -330,12 +332,10 @@ mod tests {
 
         let app = App::from_options(opts).unwrap();
         assert_eq!(app.config.device, "/dev/ttyUSB1");
-        let _ = std::fs::remove_dir_all(home);
     }
 
     #[test]
     fn config_prefers_file_values_when_cli_missing() {
-        let home = set_temp_home();
         let cfg_file = Config {
             device: "/dev/ttyS0".into(),
             baud: 9_600,
@@ -372,7 +372,6 @@ mod tests {
         assert_eq!(merged.pcf8574_addr, cfg_file.pcf8574_addr);
         assert_eq!(merged.polling_enabled, cfg_file.polling_enabled);
         assert_eq!(merged.poll_interval_ms, cfg_file.poll_interval_ms);
-        let _ = std::fs::remove_dir_all(home);
     }
 
     #[test]
@@ -426,9 +425,8 @@ mod tests {
 
     #[test]
     fn cli_overrides_config_file_values() {
-        let home = set_temp_home();
-
-        let custom_path = home.join("custom-config.toml");
+        let dir = tempdir().unwrap();
+        let custom_path = dir.path().join("custom-config.toml");
         let mut custom_cfg = Config::default();
         custom_cfg.device = "/dev/ttyS3".into();
         custom_cfg.baud = 9_600;
@@ -442,19 +440,18 @@ mod tests {
         let app = App::from_options(opts).unwrap();
         assert_eq!(app.config().device, "/dev/ttyS9");
         assert_eq!(app.config().baud, 57_600);
-
-        let _ = std::fs::remove_dir_all(home);
     }
 
     #[test]
     fn rejects_cli_baud_below_minimum() {
-        let home = set_temp_home();
+        let dir = tempdir().unwrap();
+        let config_file = dir.path().join("config.toml");
         let mut opts = RunOptions::default();
+        opts.config_file = Some(config_file.to_string_lossy().to_string());
         opts.baud = Some(4_800);
         match App::from_options(opts) {
             Err(err) => assert!(format!("{err}").contains("baud must")),
             Ok(_) => panic!("expected baud validation to fail"),
         }
-        let _ = std::fs::remove_dir_all(home);
     }
 }
