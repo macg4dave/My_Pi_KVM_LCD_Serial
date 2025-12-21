@@ -14,6 +14,7 @@ use std::{
     ffi::OsString,
     fs,
     path::{Path, PathBuf},
+    process::Command as ProcessCommand,
     sync::{Mutex, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -198,4 +199,65 @@ fn malformed_config_fixture_is_rejected() {
         assert!(!cfg.device.is_empty());
         assert!(cfg.baud > 0);
     });
+}
+
+#[test]
+fn wizard_scripted_run_persists_config_to_home() {
+    let _env_guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let dir = temp_home("wizard_persist");
+    let _home_guard = EnvVarGuard::set_path("HOME", &dir);
+    let cfg_dir = dir.join(".serial_lcd");
+    fs::create_dir_all(&cfg_dir).expect("failed to create config dir");
+
+    let script_path = dir.join("wizard_answers.txt");
+    fs::write(
+        &script_path,
+        // Prompts consumed (in order): intent, lcd_present, device, baud, probe?, role, show_helpers?, save?
+        "standalone\n\
+n\n\
+/dev/ttyS42\n\
+19200\n\
+n\n\
+client\n\
+n\n\
+y\n",
+    )
+    .expect("failed to write wizard script");
+    let _script_guard = EnvVarGuard::set_path("LIFELINETTY_WIZARD_SCRIPT", &script_path);
+
+    let payload = Path::new(env!("CARGO_MANIFEST_DIR")).join("samples/test_payload.json");
+    assert!(
+        payload.exists(),
+        "missing sample payload: {}",
+        payload.display()
+    );
+
+    let output = ProcessCommand::new(env!("CARGO_BIN_EXE_lifelinetty"))
+        .arg("--wizard")
+        .arg("--payload-file")
+        .arg(payload)
+        .output()
+        .expect("failed to spawn lifelinetty");
+
+    assert!(
+        output.status.success(),
+        "lifelinetty exited non-zero: status={:?} stderr={} stdout={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    let cfg = Config::load_or_default().expect("config load failed");
+    assert_eq!(cfg.device, "/dev/ttyS42");
+    assert_eq!(cfg.baud, 19_200);
+    assert!(
+        !cfg.lcd_present,
+        "expected scripted wizard to disable LCD on headless test host"
+    );
+    assert_eq!(
+        cfg.negotiation.preference,
+        lifelinetty::negotiation::RolePreference::PreferClient
+    );
+
+    let _ = fs::remove_dir_all(&dir);
 }

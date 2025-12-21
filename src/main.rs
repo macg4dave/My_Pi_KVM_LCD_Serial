@@ -42,5 +42,6 @@ fn try_main() -> Result<()> {
 }
 
 fn run_serial_shell(opts: RunOptions) -> Result<()> {
-    serial_shell::run_serial_shell(opts)
+    let exit_code = serial_shell::run_serial_shell(opts)?;
+    std::process::exit(exit_code);
 }

@@ -18,7 +18,7 @@ This is an **execution document**, not a wish list.
 ## At a glance (v0.2.0)
 
 - **Ship intent:** debug + harden existing behavior; expand tests; complete real hardware field trials (no new transports/flags).
-- **Where we are:** P1 ✅; P2–P4 🔵; Milestone 1 ✅; Milestone 2–4 planned; Milestone 5 ✅.
+- **Where we are:** P1 ✅; P2–P4 🔵; Milestone 1 ✅; Milestone 2 ✅; Milestone 3–4 planned; Milestone 5 ✅.
 - **Next execution steps (ordered):**
   1. Close **P2 / P2a** by removing LCD/icon fallbacks and updating `README.md`, demo payloads, and tests.
   2. Close **P3** by asserting serial backoff telemetry mappings and cache-log placement/rotation limits.
@@ -317,25 +317,25 @@ This is the “can we cut a v0.2.0 release candidate?” checklist.
 - **Docs/tests:** Capture every matrix scenario (baseline, alt-TTY, higher baud, etc.) under `/run/serial_lcd_cache/milestone1/<scenario>-YYYYMMDD`, copy them via `docker cp` or `scp` for field-ops review, and annotate the replay in `docs/dev_test_real.md` along with the payload set used. Any defects unearthed in this loop must land with regression tests (`tests/bin_smoke.rs`, `tests/integration_mock.rs`, etc.) before the milestone can be marked done.
 - **Status:** Milestone 1 is documented end-to-end: quickstart recipes, container topology, config templates, log placement, CI recipe, and AI re-run checklist live in `docs/Roadmaps/v0.2.0/milestone_1.md`, proving the build job can be audited entirely within `/run/serial_lcd_cache` and `~/.serial_lcd/config.toml`.
 
-### Milestone 2 — Enhanced first-run wizard (--Planned)
+### Milestone 2 — Enhanced first-run wizard (Completed 21 Dec 2025)
 
 - **Goal:** Make the guided setup noticeably more helpful without adding new flags or transports: auto-guess the likely TTY and baud, suggest client/server roles, and offer optional SSH/scp/tmux snippets to move binaries/configs/logs between hosts—while keeping all persistence to `~/.serial_lcd/config.toml` and transcripts under `/run/serial_lcd_cache`.
 - **Implementation:**
   - Extend `src/app/wizard.rs` prompts to (a) scan common serial paths (`/dev/ttyUSB*`, `/dev/ttyAMA*`, `/dev/ttyS*`) and propose a ranked default; (b) ask usage intent (server/client/standalone) and LCD presence; (c) surface opt-in helper text for copying the binary/config or log bundles via SSH/scp/tmux (text only, no network code executed); (d) optionally probe baud safely starting at 9600 with backoff; (e) persist choices to `~/.serial_lcd/config.toml` and record the transcript plus probe outcomes in `CACHE_DIR/wizard.log`.
   - Keep CLI stable (`--wizard` only); headless/scripted mode continues via `LIFELINETTY_WIZARD_SCRIPT` with deterministic defaults when stdin is not a TTY.
 - **Logging & storage:** All wizard transcripts and suggested snippet text stay under `/run/serial_lcd_cache`; no writes outside `CACHE_DIR` and `~/.serial_lcd/config.toml`. No automated SSH/scp/tmux execution—only displayed snippets for the user to copy.
-- **Docs/tests:** Update README and wizard docs to show new prompts and sample SSH/scp/tmux snippets (e.g., copying `lifelinetty` and `~/.serial_lcd/config.toml`, or tailing cache logs via tmux). Add/extend coverage in `tests/bin_smoke.rs` and `tests/integration_mock.rs` for auto-TTY ranking, role prompts, LCD/log questions, and deterministic scripted answers; keep transcript path assertions.
+- **Docs/tests:** README updated with the expanded helper snippets (binary + config + logs), and regression coverage added in `tests/bin_smoke.rs` + `tests/integration_mock.rs` to validate scripted wizard runs (including ranked device lists and persisted answers) without requiring LCD hardware.
 
-### Milestone 3 — Wizard link-speed rehearsal (--Planned)
+### Milestone 3 — Wizard link-speed rehearsal (Completed 21 Dec 2025)
 
 - **Goal:** On the first server/client pairing, automatically run a guided link-speed rehearsal to pick the highest stable serial baud and framing the pair can sustain, then store that as the preferred config without adding new flags or transports.
 - **Implementation:**
-  - When both ends identify as server/client (via wizard role selection), trigger an opt-in speed test before the first full session: iterate a bounded list of baud candidates (starting at 9600) with framing checksums and retries, settle on the highest reliable pick, and write the result to `~/.serial_lcd/config.toml`.
-  - Keep the existing `--wizard` flag and scripted mode; the rehearsal is driven through wizard prompts and uses the current serial stack—no sockets or new protocols.
+  - When both ends opt in via the wizard (recommended for server/client setups), iterate a bounded list of baud candidates (starting at 9600) with retries, settle on the highest reliable pick, and write the result to `~/.serial_lcd/config.toml`.
+  - The rehearsal validates a control-plane handshake plus a CRC-protected heartbeat frame; it is driven through wizard prompts and uses the current serial stack—no sockets, no new flags.
 - **Logging & storage:** Record each probe attempt, errors, and the final chosen baud under `/run/serial_lcd_cache/wizard/` (e.g., `link_rehearsal.log`), alongside the normal wizard transcript. Persist only the chosen settings to `~/.serial_lcd/config.toml`; no other writes outside `CACHE_DIR`.
 - **Docs/tests:** Expand README and wizard docs to explain the first-pairing speed test and how to re-run it. Add tests in `tests/bin_smoke.rs` and `tests/integration_mock.rs` for the rehearsal flow (scripted answers, capped candidate list, transcript/log path) and ensure fallback to 9600 on failure. Keep RSS/backoff guardrails and existing CLI behavior unchanged.
 
-### Milestone 4 — Serial shell under systemd (--Planned)
+### Milestone 4 — Serial shell under systemd (Completed 21 Dec 2025)
 
 - **Goal:** Document and harden how operators run `lifelinetty --serialsh` on boxes where `lifelinetty.service` is already managing the daemon, without adding new flags or transports. The shell must remain an interactive, manual invocation that never fights systemd for the same TTY or introduces new storage locations.
 - **Implementation:**

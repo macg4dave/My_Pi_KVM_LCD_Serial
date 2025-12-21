@@ -3,10 +3,12 @@ use crate::{
     config::{loader, Config, DEFAULT_DEVICE, MAX_COLS, MAX_ROWS, MIN_BAUD, MIN_COLS, MIN_ROWS},
     lcd::Lcd,
     negotiation::RolePreference,
+    payload::{decode_tunnel_frame, encode_tunnel_msg, TunnelMsgOwned},
     serial::{SerialOptions, SerialPort},
     Result, CACHE_DIR,
 };
 use humantime::format_rfc3339;
+use serde_json;
 use std::{
     fs::{self, OpenOptions},
     io::{self, IsTerminal, Write},
@@ -186,10 +188,14 @@ impl FirstRunWizard {
         println!("Device: {}", answers.device);
         println!("Baud: {}", answers.baud);
         println!("LCD present: {}", answers.lcd_present);
-        println!("LCD geometry: {} cols x {} rows", answers.cols, answers.rows);
+        println!(
+            "LCD geometry: {} cols x {} rows",
+            answers.cols, answers.rows
+        );
         println!("Usage intent: {}", answers.intent.as_str());
         println!("Role preference: {}", answers.preference.as_str());
         println!("Probe serial: {}", answers.run_probe);
+        println!("Link rehearsal: {}", answers.run_link_rehearsal);
         println!("Show helper snippets: {}", answers.show_helpers);
 
         let save_confirmed =
@@ -279,16 +285,56 @@ impl FirstRunWizard {
             }
         };
 
-        let default_baud = self.defaults.baud.max(MIN_BAUD);
-        display.banner("Target baud", &format!("{default_baud} bps"));
-        let baud = prompt_baud(prompter, default_baud)?;
+        let run_link_rehearsal =
+            prompter.is_interactive() && !matches!(intent, UsageIntent::Standalone);
 
-        display.banner("Probe serial", "optional");
-        let run_probe = prompt_yes_no(
-            prompter,
-            "Probe the selected device at 9600 and the target baud (y/n)",
-            prompter.is_interactive(),
-        )?;
+        let (baud, run_probe) = if run_link_rehearsal {
+            let mut candidates = vec![MIN_BAUD, 19_200, 38_400, 57_600, 115_200];
+            if self.defaults.baud > MIN_BAUD && !candidates.contains(&self.defaults.baud) {
+                candidates.push(self.defaults.baud);
+            }
+            candidates.sort_unstable();
+            candidates.dedup();
+
+            display.banner("Rehearsal", "testing bauds");
+            println!("\n=== Link-speed rehearsal ===");
+            println!("Run this on both ends at the same time with the same device selected.");
+            println!("Candidates: {:?}", candidates);
+            let base_options = SerialOptions {
+                baud: MIN_BAUD,
+                timeout_ms: self.defaults.serial_timeout_ms,
+                flow_control: self.defaults.flow_control,
+                parity: self.defaults.parity,
+                stop_bits: self.defaults.stop_bits,
+                dtr: self.defaults.dtr_on_open,
+            };
+            let (chosen, attempts) = run_link_speed_rehearsal(
+                &device,
+                base_options,
+                &self.defaults.negotiation,
+                self.defaults.protocol.compression_enabled,
+                &candidates,
+            );
+            println!("Results:");
+            for attempt in &attempts {
+                let status = if attempt.success { "ok" } else { "error" };
+                println!("  - {status} baud {}: {}", attempt.baud, attempt.message);
+            }
+            println!("Selected baud: {chosen}");
+            (chosen, false)
+        } else {
+            let default_baud = self.defaults.baud.max(MIN_BAUD);
+            display.banner("Target baud", &format!("{default_baud} bps"));
+            let baud = prompt_baud(prompter, default_baud)?;
+
+            display.banner("Probe serial", "optional");
+            let run_probe = prompt_yes_no(
+                prompter,
+                "Probe the selected device at 9600 and the target baud (y/n)",
+                prompter.is_interactive(),
+            )?;
+            (baud, run_probe)
+        };
 
         let (cols, rows) = if lcd_present {
             display.banner("LCD columns", &format!("{} cols", self.defaults.cols));
@@ -325,27 +371,38 @@ impl FirstRunWizard {
             lcd_present,
             intent,
             run_probe,
+            run_link_rehearsal,
             show_helpers,
         })
     }
 
     fn device_candidates(&self) -> Vec<String> {
-        let mut devices = Vec::new();
+        // Always present a *ranked* list to the user.
+        //
+        // If an existing config is present, keep that selection as the first
+        // (most likely correct) default, but still show the remaining
+        // candidates in ranked order.
 
-        if self.has_existing_config {
-            append_unique(&mut devices, self.defaults.device.clone());
-        }
-
+        let mut ranked = Vec::new();
         for dev in enumerate_serial_devices_ranked() {
-            append_unique(&mut devices, dev);
+            append_unique(&mut ranked, dev);
         }
+        append_unique(&mut ranked, self.defaults.device.clone());
+        append_unique(&mut ranked, DEFAULT_DEVICE.to_string());
+        ranked.retain(|d| !d.is_empty());
+        rank_serial_devices(&mut ranked);
 
         if !self.has_existing_config {
-            append_unique(&mut devices, self.defaults.device.clone());
+            return ranked;
         }
 
-        append_unique(&mut devices, DEFAULT_DEVICE.to_string());
-        devices.retain(|d| !d.is_empty());
+        let mut devices = Vec::new();
+        append_unique(&mut devices, self.defaults.device.clone());
+        for dev in ranked {
+            if dev != self.defaults.device {
+                append_unique(&mut devices, dev);
+            }
+        }
         devices
     }
 }
@@ -369,11 +426,248 @@ struct WizardAnswers {
     lcd_present: bool,
     intent: UsageIntent,
     run_probe: bool,
+    run_link_rehearsal: bool,
     show_helpers: bool,
 }
 
 fn run_probes(device: &str, target_baud: u32) -> Vec<ProbeResult> {
     run_probes_with_backoff(device, target_baud, 50, 500, 3)
+}
+
+#[derive(Clone)]
+struct LinkRehearsalAttempt {
+    baud: u32,
+    success: bool,
+    message: String,
+}
+
+struct LinkRehearsalLog {
+    path: PathBuf,
+}
+
+impl LinkRehearsalLog {
+    fn new() -> Self {
+        let path = Path::new(CACHE_DIR)
+            .join("wizard")
+            .join("link_rehearsal.log");
+        Self { path }
+    }
+
+    fn record(&self, message: impl AsRef<str>) {
+        if let Err(err) = self.try_record(message.as_ref()) {
+            eprintln!(
+                "lifelinetty wizard: failed to write link rehearsal log at {}: {err}",
+                self.path.display()
+            );
+        }
+    }
+
+    fn try_record(&self, message: &str) -> io::Result<()> {
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+        writeln!(file, "{message}")?;
+        Ok(())
+    }
+}
+
+fn run_link_speed_rehearsal(
+    device: &str,
+    base_options: SerialOptions,
+    negotiation: &crate::config::NegotiationConfig,
+    compression_enabled: bool,
+    candidates: &[u32],
+) -> (u32, Vec<LinkRehearsalAttempt>) {
+    run_link_speed_rehearsal_with(
+        device,
+        base_options,
+        negotiation,
+        compression_enabled,
+        candidates,
+        SerialPort::connect,
+    )
+}
+
+fn run_link_speed_rehearsal_with<IO, Connect>(
+    device: &str,
+    mut base_options: SerialOptions,
+    negotiation: &crate::config::NegotiationConfig,
+    compression_enabled: bool,
+    candidates: &[u32],
+    mut connect: Connect,
+) -> (u32, Vec<LinkRehearsalAttempt>)
+where
+    IO: crate::serial::LineIo,
+    Connect: FnMut(&str, SerialOptions) -> Result<IO>,
+{
+    let log = LinkRehearsalLog::new();
+    log.record(format!(
+        "=== link-speed rehearsal start device={device} candidates={:?} ===",
+        candidates
+    ));
+
+    let mut attempts = Vec::new();
+    let mut best_baud: Option<u32> = None;
+    let bounded = candidates
+        .iter()
+        .copied()
+        .filter(|b| *b >= MIN_BAUD)
+        .take(8);
+
+    for baud in bounded {
+        base_options.baud = baud;
+        let attempt_label = format!("baud={baud}");
+        let mut success = false;
+        let mut last_message = String::new();
+
+        for retry in 0..3u8 {
+            if retry != 0 && !cfg!(test) {
+                thread::sleep(Duration::from_millis(150 * retry as u64));
+            }
+
+            let mut port = match connect(device, base_options) {
+                Ok(port) => port,
+                Err(err) => {
+                    last_message = format!("connect failed: {err}");
+                    continue;
+                }
+            };
+
+            if let Err(err) = port.send_command_line("INIT") {
+                last_message = format!("INIT send failed: {err}");
+                continue;
+            }
+
+            match rehearsal_handshake(&mut port, negotiation, compression_enabled) {
+                Ok(()) => {}
+                Err(err) => {
+                    last_message = format!("handshake failed: {err}");
+                    continue;
+                }
+            }
+
+            match rehearsal_crc_roundtrip(&mut port) {
+                Ok(()) => {
+                    success = true;
+                    last_message = "ok".to_string();
+                    break;
+                }
+                Err(err) => {
+                    last_message = format!("crc probe failed: {err}");
+                }
+            }
+        }
+
+        log.record(format!("{attempt_label} success={success} {last_message}"));
+        attempts.push(LinkRehearsalAttempt {
+            baud,
+            success,
+            message: last_message.clone(),
+        });
+
+        if success {
+            best_baud = Some(baud);
+            if !cfg!(test) {
+                thread::sleep(Duration::from_millis(250));
+            }
+        } else {
+            break;
+        }
+    }
+
+    let chosen = best_baud.unwrap_or(MIN_BAUD);
+    log.record(format!("chosen_baud={chosen}"));
+    log.record("=== link-speed rehearsal end ===");
+    (chosen, attempts)
+}
+
+fn rehearsal_handshake<IO: crate::serial::LineIo>(
+    io: &mut IO,
+    negotiation: &crate::config::NegotiationConfig,
+    compression_enabled: bool,
+) -> Result<()> {
+    let negotiator = crate::app::negotiation::Negotiator::new(negotiation, compression_enabled);
+    let hello_frame = negotiator.hello_frame();
+    let hello_payload = serde_json::to_string(&hello_frame)
+        .map_err(|e| crate::Error::Parse(format!("json: {e}")))?;
+    io.send_command_line(&hello_payload)?;
+
+    let deadline = std::time::Instant::now() + Duration::from_millis(negotiation.timeout_ms);
+    let mut buffer = String::new();
+    while std::time::Instant::now() < deadline {
+        let read = io.read_message_line(&mut buffer)?;
+        if read == 0 {
+            continue;
+        }
+        let trimmed = buffer.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        match serde_json::from_str::<crate::negotiation::ControlFrame>(trimmed) {
+            Ok(crate::negotiation::ControlFrame::Hello {
+                node_id,
+                caps,
+                pref,
+                ..
+            }) => {
+                let (remote, _) =
+                    crate::app::negotiation::RemoteHello::from_parts(node_id, &pref, caps.bits);
+                let decision = negotiator.decide_roles(&remote);
+                let ack = crate::negotiation::ControlFrame::HelloAck {
+                    chosen_role: decision.remote_role.as_str().to_string(),
+                    peer_caps: crate::negotiation::ControlCaps {
+                        bits: negotiator.local_caps().bits(),
+                    },
+                };
+                let ack_payload = serde_json::to_string(&ack)
+                    .map_err(|e| crate::Error::Parse(format!("json: {e}")))?;
+                io.send_command_line(&ack_payload)?;
+                continue;
+            }
+            Ok(crate::negotiation::ControlFrame::HelloAck { .. }) => return Ok(()),
+            Ok(crate::negotiation::ControlFrame::LegacyFallback) => {
+                return Err(crate::Error::Parse("peer requested legacy fallback".into()))
+            }
+            Err(_) => {
+                return Err(crate::Error::Parse(
+                    "unexpected non-control frame during rehearsal handshake".into(),
+                ))
+            }
+        }
+    }
+
+    Err(crate::Error::Parse("handshake timed out".into()))
+}
+
+fn rehearsal_crc_roundtrip<IO: crate::serial::LineIo>(io: &mut IO) -> Result<()> {
+    let frame = encode_tunnel_msg(&TunnelMsgOwned::Heartbeat)?;
+    io.send_command_line(&frame)?;
+
+    let mut buf = String::new();
+    let deadline = std::time::Instant::now() + Duration::from_millis(600);
+    while std::time::Instant::now() < deadline {
+        let read = io.read_message_line(&mut buf)?;
+        if read == 0 {
+            continue;
+        }
+        let trimmed = buf.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let msg = decode_tunnel_frame(trimmed)?;
+        if matches!(msg, TunnelMsgOwned::Heartbeat) {
+            return Ok(());
+        }
+    }
+
+    Err(crate::Error::Parse(
+        "timed out waiting for heartbeat echo".into(),
+    ))
 }
 
 fn run_probes_with_backoff(
@@ -389,15 +683,7 @@ fn run_probes_with_backoff(
     }
     rates
         .into_iter()
-        .map(|rate| {
-            probe_with_backoff(
-                device,
-                rate,
-                backoff_initial_ms,
-                backoff_max_ms,
-                attempts,
-            )
-        })
+        .map(|rate| probe_with_backoff(device, rate, backoff_initial_ms, backoff_max_ms, attempts))
         .collect()
 }
 
@@ -499,6 +785,11 @@ impl WizardSummary {
         writeln!(file, "intent: {}", entry.answers.intent.as_str())?;
         writeln!(file, "preference: {}", entry.answers.preference.as_str())?;
         writeln!(file, "run_probe: {}", entry.answers.run_probe)?;
+        writeln!(
+            file,
+            "run_link_rehearsal: {}",
+            entry.answers.run_link_rehearsal
+        )?;
         writeln!(file, "show_helpers: {}", entry.answers.show_helpers)?;
         for probe in &entry.probes {
             let status = if probe.success { "ok" } else { "error" };
@@ -556,6 +847,11 @@ impl WizardTranscript {
         writeln!(file, "lcd_present: {}", entry.answers.lcd_present)?;
         writeln!(file, "preference: {}", entry.answers.preference.as_str())?;
         writeln!(file, "run_probe: {}", entry.answers.run_probe)?;
+        writeln!(
+            file,
+            "run_link_rehearsal: {}",
+            entry.answers.run_link_rehearsal
+        )?;
         writeln!(file, "show_helpers: {}", entry.answers.show_helpers)?;
 
         writeln!(file, "candidates:")?;
@@ -851,8 +1147,34 @@ fn print_wizard_helper_snippets() {
     println!("\n=== Wizard helper snippets (copy/paste) ===");
     println!("Nothing runs automatically. These are optional snippets you can paste yourself.");
     println!();
+    println!("Copy the lifelinetty binary to a Pi (adjust paths/users as needed):");
+    println!("  scp ./target/release/lifelinetty pi@raspberrypi.local:/usr/local/bin/lifelinetty");
+    println!();
+    println!(
+        "Copy your config to the Pi (keeps persistence limited to ~/.serial_lcd/config.toml):"
+    );
+    println!("  scp ~/.serial_lcd/config.toml pi@raspberrypi.local:~/.serial_lcd/config.toml");
+    println!();
     println!("Pull wizard/cache logs back to your laptop:");
     println!("  scp -r pi@raspberrypi.local:/run/serial_lcd_cache ./pi-logs/");
+    println!();
+    println!(
+        "If lifelinetty is already running under systemd on the target, avoid TTY contention:"
+    );
+    println!("  ssh -t pi@raspberrypi.local 'sudo systemctl stop lifelinetty.service'");
+    println!(
+        "  ssh -t pi@raspberrypi.local 'sudo systemctl status lifelinetty.service --no-pager'"
+    );
+    println!();
+    println!("Run serial shell in a persistent SSH+tmux session (adjust device/baud):");
+    println!("  ssh -t pi@raspberrypi.local \\");
+    println!(
+        "    'tmux new -A -s lifelinetty_serialsh \"lifelinetty --serialsh --device /dev/ttyUSB0 --baud 9600\"'"
+    );
+    println!();
+    println!("When finished, restart the service and follow logs:");
+    println!("  ssh -t pi@raspberrypi.local 'sudo systemctl restart lifelinetty.service'");
+    println!("  ssh -t pi@raspberrypi.local 'sudo journalctl -u lifelinetty.service -f'");
     println!();
     println!("Tail wizard + serial backoff logs on the Pi (tmux keeps it alive):");
     println!("  ssh -t pi@raspberrypi.local \\");
@@ -990,9 +1312,9 @@ fn prompt_role(prompter: &mut WizardPrompter, default: RolePreference) -> Result
             "2" | "client" => return Ok(RolePreference::PreferClient),
             "3" | "standalone" | "auto" | "none" => return Ok(RolePreference::NoPreference),
             "?" | "help" => eprintln!("Choose 1=server, 2=client, 3=auto."),
-            other => eprintln!(
-                "Unknown role '{other}', choose server, client, standalone, or auto."
-            ),
+            other => {
+                eprintln!("Unknown role '{other}', choose server, client, standalone, or auto.")
+            }
         }
     }
 }
@@ -1000,6 +1322,7 @@ fn prompt_role(prompter: &mut WizardPrompter, default: RolePreference) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::serial::fake::FakeSerialPort;
     use tempfile::tempdir;
 
     fn scripted_input(lines: &[&str]) -> PromptInput {
@@ -1025,6 +1348,7 @@ mod tests {
             "2",
             "client",
             "n",
+            "y",
         ];
         wizard
             .run(scripted_input(&answers))
@@ -1060,5 +1384,54 @@ mod tests {
             .map(|s| s.to_string())
             .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn link_rehearsal_selects_highest_successful_baud() {
+        let negotiation = crate::config::NegotiationConfig::default();
+        let base_options = SerialOptions::default();
+        let candidates = [MIN_BAUD, 19_200, 38_400];
+        let heartbeat = encode_tunnel_msg(&TunnelMsgOwned::Heartbeat).unwrap();
+
+        let mut ports: std::collections::VecDeque<FakeSerialPort> = std::collections::VecDeque::from([
+            // 9600 attempt: peer replies with hello_ack and then heartbeat.
+            FakeSerialPort::new(vec![
+                Ok("{\"type\":\"hello_ack\",\"chosen_role\":\"server\",\"peer_caps\":{\"bits\":1}}".into()),
+                Ok(heartbeat.clone()),
+            ]),
+            // 19200 attempt: same success.
+            FakeSerialPort::new(vec![
+                Ok("{\"type\":\"hello_ack\",\"chosen_role\":\"server\",\"peer_caps\":{\"bits\":1}}".into()),
+                Ok(heartbeat.clone()),
+            ]),
+            // 38400 attempt: handshake fails (non-control frame).
+            FakeSerialPort::new(vec![Ok("not-json".into())]),
+        ]);
+
+        let (chosen, attempts) = run_link_speed_rehearsal_with::<FakeSerialPort, _>(
+            "/dev/fake0",
+            base_options,
+            &negotiation,
+            false,
+            &candidates,
+            |_device, _options| {
+                ports
+                    .pop_front()
+                    .ok_or_else(|| crate::Error::Parse("no port".into()))
+            },
+        );
+
+        assert_eq!(chosen, 19_200);
+        assert_eq!(attempts.len(), 3);
+        assert!(attempts[0].success);
+        assert!(attempts[1].success);
+        assert!(!attempts[2].success);
+    }
+
+    #[test]
+    fn link_rehearsal_log_stays_under_cache_dir() {
+        let log = LinkRehearsalLog::new();
+        assert!(log.path.starts_with(CACHE_DIR));
+        assert!(log.path.ends_with(Path::new("wizard/link_rehearsal.log")));
     }
 }

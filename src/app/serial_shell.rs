@@ -22,7 +22,7 @@ impl SerialShellTransport for SerialPort {
 }
 
 /// Run the serial shell with stdin/stdout/stderr connected to the current process.
-pub fn run_serial_shell(opts: RunOptions) -> Result<()> {
+pub fn run_serial_shell(opts: RunOptions) -> Result<i32> {
     super::wizard::maybe_run(&opts)?;
     let cfg = Config::load_or_default()?;
     let merged = AppConfig::from_sources(cfg, opts);
@@ -31,9 +31,7 @@ pub fn run_serial_shell(opts: RunOptions) -> Result<()> {
     let mut stdin_lock = stdin.lock();
     let mut stdout = io::stdout();
     let mut stderr = io::stderr();
-    let exit_code =
-        drive_serial_shell_loop(&mut serial, &mut stdin_lock, &mut stdout, &mut stderr)?;
-    std::process::exit(exit_code);
+    drive_serial_shell_loop(&mut serial, &mut stdin_lock, &mut stdout, &mut stderr)
 }
 
 /// Core loop used by `run_serial_shell`. Accepts injectable transports + IO for easier testing.
@@ -55,7 +53,7 @@ where
 
     loop {
         buffer.clear();
-        write_prompt(stdout)?;
+        write_prompt(stderr)?;
         let bytes = input.read_line(&mut buffer)?;
         if bytes == 0 {
             break;
@@ -74,9 +72,9 @@ where
     Ok(last_exit)
 }
 
-fn write_prompt<W: Write>(stdout: &mut W) -> Result<()> {
-    stdout.write_all(b"serialsh> ")?;
-    stdout.flush()?;
+fn write_prompt<W: Write>(stderr: &mut W) -> Result<()> {
+    stderr.write_all(b"serialsh> ")?;
+    stderr.flush()?;
     Ok(())
 }
 
@@ -169,10 +167,10 @@ mod tests {
             .expect("failed to drive loop");
 
         assert_eq!(exit_code, 42);
-        assert!(stderr.is_empty(), "stderr got data: {:?}", stderr);
         let output = String::from_utf8_lossy(&stdout);
-        assert!(output.matches("serialsh> ").count() >= 2);
         assert!(output.contains("hello"));
+        let err_text = String::from_utf8_lossy(&stderr);
+        assert!(err_text.matches("serialsh> ").count() >= 2);
         assert_eq!(
             serial.writes(),
             &[
@@ -195,7 +193,9 @@ mod tests {
             .expect("loop failed");
 
         assert_eq!(exit_code, 1);
-        assert!(String::from_utf8_lossy(&stderr).contains("remote busy"));
+        let err_text = String::from_utf8_lossy(&stderr);
+        assert!(err_text.contains("remote busy"));
+        assert!(err_text.contains("serialsh> "));
     }
 
     #[test]
@@ -216,10 +216,10 @@ mod tests {
             .expect("loop failed");
 
         assert_eq!(exit_code, 0);
-        assert!(stderr.is_empty(), "stderr should be empty: {stderr:?}");
         let output = String::from_utf8_lossy(&stdout);
         assert!(output.contains("pong"), "stdout missing pong: {output}");
-        assert!(output.matches("serialsh> ").count() >= 2);
+        let err_text = String::from_utf8_lossy(&stderr);
+        assert!(err_text.matches("serialsh> ").count() >= 2);
         assert_eq!(
             serial.writes(),
             &[

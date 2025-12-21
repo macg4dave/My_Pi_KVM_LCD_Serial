@@ -419,12 +419,26 @@ Need a quick, scriptable override without editing the config? Set `LIFELINETTY_D
     7. LCD rows (skipped if LCD is absent)
     8. role preference (`server`/`client`/`auto`)
     9. show helper snippets? (`y`/`n`)
+    10. save config? (`y`/`n`)
 - **LCD detection**: the wizard now asks up front whether an LCD is connected before touching the hardware; answering `n` saves a 2-row fallback configuration so the daemon keeps running without an attached display.
 - **LCD cues + logging**: prompts mirror onto the LCD (when available), and every outcome is appended to `/run/serial_lcd_cache/wizard/summary.log` (plus the full prompt transcript at `/run/serial_lcd_cache/wizard.log`) for auditing alongside serial/log caches.
+- **Link-speed rehearsal (Milestone 3)**: in interactive `server`/`client` setups the wizard automatically runs a bounded baud sweep (starting at 9600) that performs a handshake + CRC heartbeat check and stores the highest reliable baud. Attempts are logged to `/run/serial_lcd_cache/wizard/link_rehearsal.log`.
 
 #### Wizard helper snippets (Milestone 2)
 
 The wizard can optionally surface opt-in text-only helpers during the interview. Nothing runs automatically—the wizard only shows you snippets you can paste yourself. Examples:
+
+- **Copy the `lifelinetty` binary to a Pi (adjust paths/users as needed):**
+
+  ```sh
+  scp ./target/release/lifelinetty pi@raspberrypi.local:/usr/local/bin/lifelinetty
+  ```
+
+- **Copy your config to the Pi (keeps persistence limited to `~/.serial_lcd/config.toml`):**
+
+  ```sh
+  scp ~/.serial_lcd/config.toml pi@raspberrypi.local:~/.serial_lcd/config.toml
+  ```
 
 - **Pull wizard/cache logs back to your laptop:**
 
@@ -450,6 +464,23 @@ All paths stay within `/run/serial_lcd_cache` or `~/.serial_lcd/config.toml`, ma
 ### Serial shell mode (Milestone G)
 
 Milestone G supplies an official interactive shell for the command tunnel. Run `lifelinetty --serialsh` to drop into the `serialsh>` prompt, send JSON `CmdRequest` frames, and stream the remote stdout/stderr chunks plus their exit code. Busy responses and command failures stay visible so you always know when the remote host is congested. The CLI rejects `--demo` and `--payload-file` when `--serialsh` is enabled so that the tunnel stays dedicated to interactive commands, and the default systemd service still runs the headless `lifelinetty run` path unless you explicitly launch the shell yourself.
+The prompt is printed on stderr so stdout stays clean for piping/redirecting remote command output.
+
+#### Running serialsh on a systemd-managed host (Milestone 4)
+
+- If `lifelinetty.service` is already running and owns the TTY, stop it first (or point `--device` at an idle TTY) to avoid two processes fighting over the same `/dev/tty*`.
+- Recommended flow over SSH (tmux keeps the session alive):
+
+  ```sh
+  ssh -t pi@raspberrypi.local 'sudo systemctl stop lifelinetty.service'
+  ssh -t pi@raspberrypi.local \
+    'tmux new -A -s lifelinetty_serialsh "lifelinetty --serialsh --device /dev/ttyUSB0 --baud 9600"'
+  # when done:
+  ssh -t pi@raspberrypi.local 'sudo systemctl restart lifelinetty.service'
+  ssh -t pi@raspberrypi.local 'sudo journalctl -u lifelinetty.service -f'
+  ```
+
+All interactive output stays on your terminal (stderr/stdout). Persistent config remains `~/.serial_lcd/config.toml`; avoid writing anywhere outside `/run/serial_lcd_cache` on the target.
 
 ### Serial precedence cheatsheet
 

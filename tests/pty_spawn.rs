@@ -386,6 +386,10 @@ fn pty_spawn_serialsh_tunnel_round_trip() {
     if let Some(mut out) = child.stdout.take() {
         let _ = out.read_to_string(&mut stdout);
     }
+    let mut stderr = String::new();
+    if let Some(mut err) = child.stderr.take() {
+        let _ = err.read_to_string(&mut stderr);
+    }
 
     assert!(saw_init, "expected serialsh to emit INIT over serial");
     assert!(
@@ -393,8 +397,8 @@ fn pty_spawn_serialsh_tunnel_round_trip() {
         "expected to receive CmdRequest and reply over tunnel"
     );
     assert!(
-        stdout.contains("serialsh>"),
-        "expected shell prompt in stdout"
+        stderr.contains("serialsh>"),
+        "expected shell prompt in stderr"
     );
     assert!(stdout.contains("hello"), "expected tunnel stdout to print");
 }

@@ -10,6 +10,7 @@ use std::{
     ffi::{OsStr, OsString},
     fs,
     path::{Path, PathBuf},
+    process::Command as ProcessCommand,
     sync::{Mutex, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -140,6 +141,121 @@ fn help_lists_core_flags() {
     for flag in ["--serialsh", "--wizard"] {
         assert!(help.contains(flag), "help output missing {flag}: {help}");
     }
+}
+
+#[test]
+fn wizard_prints_helpers_and_ranks_device_list() {
+    with_temp_home(|home| {
+        let script = install_wizard_script(
+            home,
+            "wizard_script_helpers.txt",
+            // Prompts consumed (in order): intent, lcd_present, device, baud, probe?, role, show_helpers?, save?
+            "standalone\n\
+n\n\
+1\n\
+9600\n\
+n\n\
+auto\n\
+y\n\
+y\n",
+        );
+
+        // Force all output to stay in the temp HOME, and keep the runtime
+        // non-hardware by having the wizard store lcd_present=false.
+        let payload = Path::new(env!("CARGO_MANIFEST_DIR")).join("samples/test_payload.json");
+        assert!(
+            payload.exists(),
+            "missing sample payload: {}",
+            payload.display()
+        );
+
+        let output = ProcessCommand::new(env!("CARGO_BIN_EXE_lifelinetty"))
+            .env("HOME", home)
+            .env(
+                "LIFELINETTY_WIZARD_SCRIPT",
+                env::var("LIFELINETTY_WIZARD_SCRIPT").unwrap(),
+            )
+            .arg("--wizard")
+            .arg("--payload-file")
+            .arg(payload)
+            .output()
+            .expect("failed to spawn lifelinetty");
+
+        drop(script);
+
+        assert!(
+            output.status.success(),
+            "lifelinetty exited non-zero: status={:?} stderr={} stdout={}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr),
+            String::from_utf8_lossy(&output.stdout)
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("=== Wizard helper snippets"));
+        assert!(stdout.contains("scp ./target/release/lifelinetty"));
+        assert!(stdout.contains("scp ~/.serial_lcd/config.toml"));
+        assert!(stdout.contains("/run/serial_lcd_cache"));
+
+        // The device list is printed as "Detected serial devices (ranked):" followed by numbered lines.
+        // Assert the printed list is in non-decreasing rank order.
+        let mut seen_header = false;
+        let mut devices = Vec::new();
+        for line in stdout.lines() {
+            if line.trim() == "Detected serial devices (ranked):" {
+                seen_header = true;
+                continue;
+            }
+            if !seen_header {
+                continue;
+            }
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with('[') {
+                // The list ends before the next instruction line.
+                if !devices.is_empty() {
+                    break;
+                }
+                continue;
+            }
+            // Format: "[N] /dev/ttyXYZ"
+            if let Some((_, rest)) = trimmed.split_once(']') {
+                let dev = rest.trim();
+                if dev.starts_with("/dev/") {
+                    devices.push(dev.to_string());
+                }
+            }
+        }
+
+        assert!(
+            !devices.is_empty(),
+            "expected at least one device candidate to be printed"
+        );
+        for pair in devices.windows(2) {
+            let (a, b) = (&pair[0], &pair[1]);
+            let (wa, ka) = device_rank_key_for_test(a);
+            let (wb, kb) = device_rank_key_for_test(b);
+            assert!(
+                wa < wb || (wa == wb && ka <= kb),
+                "device list not ranked: '{a}' (w={wa},k={ka}) came before '{b}' (w={wb},k={kb})\nstdout={stdout}"
+            );
+        }
+    });
+}
+
+fn device_rank_key_for_test(path: &str) -> (u8, String) {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let weight = if name.starts_with("ttyUSB") {
+        0
+    } else if name.starts_with("ttyACM") {
+        1
+    } else if name.starts_with("ttyAMA") {
+        2
+    } else if name.starts_with("ttyS") {
+        3
+    } else {
+        4
+    };
+    (weight, name.to_string())
 }
 
 #[test]
@@ -478,9 +594,9 @@ mod serialsh_smoke {
 
         assert_eq!(exit_code, 42);
         let out_text = String::from_utf8_lossy(&stdout);
-        assert!(out_text.contains("serialsh> "));
         assert!(out_text.contains("hello"));
         let err_text = String::from_utf8_lossy(&stderr);
+        assert!(err_text.contains("serialsh> "));
         assert!(err_text.contains("warn"));
         assert_eq!(
             serial.writes(),
@@ -504,7 +620,9 @@ mod serialsh_smoke {
             .expect("serial shell failed");
 
         assert_eq!(exit_code, 1);
-        assert!(String::from_utf8_lossy(&stderr).contains("remote busy"));
+        let err_text = String::from_utf8_lossy(&stderr);
+        assert!(err_text.contains("serialsh> "));
+        assert!(err_text.contains("remote busy"));
         assert_eq!(
             serial.writes(),
             &[
