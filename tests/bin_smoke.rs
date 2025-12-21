@@ -356,6 +356,46 @@ cols = 20
 }
 
 #[test]
+fn wizard_runs_when_config_exists_but_empty() {
+    with_temp_home(|home| {
+        write_config(home, "   \n");
+        let _script_guard = install_wizard_script(
+            home,
+            "wizard_empty.txt",
+            "standalone\ny\n/dev/ttyS8\n19200\nn\n16\n2\nauto\nn\n",
+        );
+
+        let app = App::from_options(RunOptions::default()).expect("wizard repair init failed");
+        drop(app);
+
+        let cfg = Config::load_or_default().expect("config load failed");
+        assert_eq!(cfg.device, "/dev/ttyS8");
+        assert_eq!(cfg.baud, 19_200);
+        assert_eq!(cfg.negotiation.preference, RolePreference::NoPreference);
+    });
+}
+
+#[test]
+fn wizard_runs_when_config_is_unparseable() {
+    with_temp_home(|home| {
+        write_config(home, "device \"/dev/ttyUSB0\"\n");
+        let _script_guard = install_wizard_script(
+            home,
+            "wizard_bad_cfg.txt",
+            "client\ny\n/dev/ttyACM9\n57600\nn\n20\n4\nclient\nn\n",
+        );
+
+        let app = App::from_options(RunOptions::default()).expect("wizard repair init failed");
+        drop(app);
+
+        let cfg = Config::load_or_default().expect("config load failed");
+        assert_eq!(cfg.device, "/dev/ttyACM9");
+        assert_eq!(cfg.baud, 57_600);
+        assert_eq!(cfg.negotiation.preference, RolePreference::PreferClient);
+    });
+}
+
+#[test]
 fn wizard_force_env_overrides_existing_config() {
     with_temp_home(|home| {
         write_config(

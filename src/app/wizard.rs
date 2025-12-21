@@ -25,16 +25,16 @@ pub fn maybe_run(opts: &RunOptions) -> Result<()> {
 
     let config_path = loader::default_config_path()?;
     let config_exists = config_path.exists();
-    let should_run = opts.wizard || forced_env || !config_exists;
+    let (existing_cfg, requires_repair, repair_reason) = inspect_existing_config(&config_path);
+
+    let should_run = opts.wizard || forced_env || !config_exists || requires_repair;
     if !should_run {
         return Ok(());
     }
 
-    let existing_cfg = if config_exists {
-        Some(Config::load_from_path(&config_path)?)
-    } else {
-        None
-    };
+    if let Some(reason) = repair_reason.as_deref() {
+        eprintln!("lifelinetty wizard: {reason}");
+    }
 
     let prompt_input = determine_prompt_input();
     if let PromptInput::AutoDefaults { reason } = &prompt_input {
@@ -43,8 +43,9 @@ pub fn maybe_run(opts: &RunOptions) -> Result<()> {
         );
     }
 
+    let has_existing_config = config_exists && !requires_repair && existing_cfg.is_some();
     let defaults = existing_cfg.unwrap_or_default();
-    let mut wizard = FirstRunWizard::new(config_path, defaults, config_exists)?;
+    let mut wizard = FirstRunWizard::new(config_path, defaults, has_existing_config)?;
     wizard.run(prompt_input)
 }
 
@@ -56,6 +57,7 @@ fn determine_prompt_input() -> PromptInput {
                 let lines = contents
                     .lines()
                     .map(|line| line.trim().to_string())
+                    .filter(|line| !line.is_empty() && !line.starts_with('#'))
                     .collect::<Vec<_>>();
                 return PromptInput::Scripted { lines, cursor: 0 };
             }
@@ -83,6 +85,64 @@ fn determine_prompt_input() -> PromptInput {
     }
 }
 
+fn inspect_existing_config(path: &Path) -> (Option<Config>, bool, Option<String>) {
+    if !path.exists() {
+        return (None, false, None);
+    }
+
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) => {
+            return (
+                None,
+                true,
+                Some(format!(
+                    "failed to read existing config at {}: {err}; running wizard to repair",
+                    path.display()
+                )),
+            );
+        }
+    };
+
+    if raw.trim().is_empty() {
+        return (
+            None,
+            true,
+            Some(format!(
+                "existing config at {} is empty; running wizard to initialize",
+                path.display()
+            )),
+        );
+    }
+
+    let parsed = match loader::parse(&raw) {
+        Ok(cfg) => cfg,
+        Err(err) => {
+            return (
+                None,
+                true,
+                Some(format!(
+                    "existing config at {} is invalid ({err}); running wizard to repair",
+                    path.display()
+                )),
+            );
+        }
+    };
+
+    if let Err(err) = crate::config::validate(&parsed) {
+        return (
+            None,
+            true,
+            Some(format!(
+                "existing config at {} is invalid ({err}); running wizard to repair",
+                path.display()
+            )),
+        );
+    }
+
+    (Some(parsed), false, None)
+}
+
 struct FirstRunWizard {
     config_path: PathBuf,
     defaults: Config,
@@ -108,18 +168,38 @@ impl FirstRunWizard {
         let default_intent =
             UsageIntent::from_role_preference(self.defaults.negotiation.preference);
         let intent = prompt_usage_intent(&mut prompter, default_intent)?;
-        let lcd_present = prompt_lcd_presence(&mut prompter)?;
+        let lcd_present = prompt_lcd_presence(&mut prompter, self.defaults.lcd_present)?;
         let mut display = WizardDisplay::new(&self.defaults, lcd_present);
         display.banner("First-run wizard", "Check console");
 
-        let candidate_devices = self.device_candidates();
+        let mut candidate_devices = self.device_candidates();
         let answers = self.collect_answers(
-            &candidate_devices,
+            &mut candidate_devices,
             &mut prompter,
             &mut display,
             intent,
             lcd_present,
         )?;
+
+        println!("\n=== Review settings ===");
+        println!("Config path: {}", self.config_path.display());
+        println!("Device: {}", answers.device);
+        println!("Baud: {}", answers.baud);
+        println!("LCD present: {}", answers.lcd_present);
+        println!("LCD geometry: {} cols x {} rows", answers.cols, answers.rows);
+        println!("Usage intent: {}", answers.intent.as_str());
+        println!("Role preference: {}", answers.preference.as_str());
+        println!("Probe serial: {}", answers.run_probe);
+        println!("Show helper snippets: {}", answers.show_helpers);
+
+        let save_confirmed =
+            prompt_yes_no(&mut prompter, "Write these settings to disk (y/n)", true)?;
+        if !save_confirmed {
+            return Err(crate::Error::InvalidArgs(
+                "wizard aborted; config not saved".to_string(),
+            ));
+        }
+
         self.save_config(&answers)?;
 
         let probes = if answers.run_probe {
@@ -164,7 +244,7 @@ impl FirstRunWizard {
 
     fn collect_answers(
         &self,
-        candidates: &[String],
+        candidates: &mut Vec<String>,
         prompter: &mut WizardPrompter,
         display: &mut WizardDisplay,
         intent: UsageIntent,
@@ -175,20 +255,29 @@ impl FirstRunWizard {
 
         println!("\nUsage intent: {}", intent.as_str());
 
-        let default_device = candidates
-            .first()
-            .cloned()
-            .unwrap_or_else(|| DEFAULT_DEVICE.to_string());
-        println!("\nDetected serial devices (ranked):");
-        if candidates.is_empty() {
-            println!("  (none discovered under /dev; enter a full path manually)");
-        } else {
-            for (idx, dev) in candidates.iter().enumerate() {
-                println!("  [{}] {}", idx + 1, dev);
+        let device = loop {
+            let default_device = candidates
+                .first()
+                .cloned()
+                .unwrap_or_else(|| DEFAULT_DEVICE.to_string());
+            println!("\nDetected serial devices (ranked):");
+            if candidates.is_empty() {
+                println!("  (none discovered under /dev; enter a full path manually)");
+            } else {
+                for (idx, dev) in candidates.iter().enumerate() {
+                    println!("  [{}] {}", idx + 1, dev);
+                }
             }
-        }
-        display.banner("Select device", &default_device);
-        let device = prompt_device(prompter, candidates, &default_device)?;
+            println!("  (enter a number, a /dev path, or 'r' to rescan)");
+            display.banner("Select device", &default_device);
+
+            match prompt_device(prompter, candidates, &default_device)? {
+                DeviceSelection::Selected(device) => break device,
+                DeviceSelection::Rescan => {
+                    *candidates = self.device_candidates();
+                }
+            }
+        };
 
         let default_baud = self.defaults.baud.max(MIN_BAUD);
         display.banner("Target baud", &format!("{default_baud} bps"));
@@ -283,6 +372,10 @@ struct WizardAnswers {
     show_helpers: bool,
 }
 
+fn run_probes(device: &str, target_baud: u32) -> Vec<ProbeResult> {
+    run_probes_with_backoff(device, target_baud, 50, 500, 3)
+}
+
 fn run_probes_with_backoff(
     device: &str,
     target_baud: u32,
@@ -294,19 +387,34 @@ fn run_probes_with_backoff(
     if target_baud != MIN_BAUD {
         rates.push(target_baud);
     }
-    let mut results = Vec::new();
-    for rate in rates {
-        results.push(probe_with_backoff(device, rate));
-    }
-    results
+    rates
+        .into_iter()
+        .map(|rate| {
+            probe_with_backoff(
+                device,
+                rate,
+                backoff_initial_ms,
+                backoff_max_ms,
+                attempts,
+            )
+        })
+        .collect()
 }
 
-fn probe_with_backoff(device: &str, baud: u32) -> ProbeResult {
-    let mut attempts = 0u8;
+fn probe_with_backoff(
+    device: &str,
+    baud: u32,
+    backoff_initial_ms: u64,
+    backoff_max_ms: u64,
+    attempts: u8,
+) -> ProbeResult {
+    let mut attempts_taken = 0u8;
     let mut last_err: Option<String> = None;
+    let mut delay_ms = 0u64;
 
-    for delay_ms in [0u64, 50, 100] {
-        attempts += 1;
+    let max_attempts = attempts.max(1);
+    for _ in 0..max_attempts {
+        attempts_taken = attempts_taken.saturating_add(1);
         if delay_ms != 0 && !cfg!(test) {
             thread::sleep(Duration::from_millis(delay_ms));
         }
@@ -320,18 +428,24 @@ fn probe_with_backoff(device: &str, baud: u32) -> ProbeResult {
             Ok(_) => {
                 return ProbeResult {
                     baud,
-                    attempts,
+                    attempts: attempts_taken,
                     success: true,
                     message: "port opened successfully".to_string(),
                 }
             }
             Err(err) => last_err = Some(err.to_string()),
         }
+
+        delay_ms = if delay_ms == 0 {
+            backoff_initial_ms
+        } else {
+            (delay_ms.saturating_mul(2)).min(backoff_max_ms)
+        };
     }
 
     ProbeResult {
         baud,
-        attempts,
+        attempts: attempts_taken,
         success: false,
         message: last_err.unwrap_or_else(|| "unknown error".to_string()),
     }
@@ -714,17 +828,20 @@ fn prompt_yes_no(prompter: &mut WizardPrompter, question: &str, default: bool) -
 
 fn prompt_usage_intent(prompter: &mut WizardPrompter, default: UsageIntent) -> Result<UsageIntent> {
     loop {
-        let response =
-            prompter.prompt("Usage intent (server/client/standalone)", default.as_str())?;
+        let response = prompter.prompt(
+            "Usage intent (1=server, 2=client, 3=standalone)",
+            default.as_str(),
+        )?;
         let trimmed = response.trim();
         if trimmed.is_empty() {
             return Ok(default);
         }
 
         match trimmed.to_ascii_lowercase().as_str() {
-            "server" => return Ok(UsageIntent::Server),
-            "client" => return Ok(UsageIntent::Client),
-            "standalone" | "solo" | "auto" => return Ok(UsageIntent::Standalone),
+            "1" | "server" => return Ok(UsageIntent::Server),
+            "2" | "client" => return Ok(UsageIntent::Client),
+            "3" | "standalone" | "solo" | "auto" => return Ok(UsageIntent::Standalone),
+            "?" | "help" => eprintln!("Choose 1=server, 2=client, 3=standalone."),
             other => eprintln!("Unknown intent '{other}', choose server, client, or standalone."),
         }
     }
@@ -761,12 +878,16 @@ fn enumerate_serial_devices_ranked() -> Vec<String> {
         }
     }
 
+    rank_serial_devices(&mut devices);
+    devices
+}
+
+fn rank_serial_devices(devices: &mut [String]) {
     devices.sort_by(|a, b| {
         let (wa, ka) = device_rank_key(a);
         let (wb, kb) = device_rank_key(b);
         wa.cmp(&wb).then_with(|| ka.cmp(kb))
     });
-    devices
 }
 
 fn device_rank_key(path: &str) -> (u8, &str) {
@@ -785,24 +906,33 @@ fn device_rank_key(path: &str) -> (u8, &str) {
     (weight, name)
 }
 
+enum DeviceSelection {
+    Selected(String),
+    Rescan,
+}
+
 fn prompt_device(
     prompter: &mut WizardPrompter,
     candidates: &[String],
     default: &str,
-) -> Result<String> {
+) -> Result<DeviceSelection> {
     loop {
         let response = prompter.prompt("Serial device path or index", default)?;
         let trimmed = response.trim();
         if trimmed.is_empty() {
-            return Ok(default.to_string());
+            return Ok(DeviceSelection::Selected(default.to_string()));
+        }
+        match trimmed.to_ascii_lowercase().as_str() {
+            "r" | "rescan" => return Ok(DeviceSelection::Rescan),
+            _ => {}
         }
         if let Ok(idx) = trimmed.parse::<usize>() {
             if idx >= 1 && idx <= candidates.len() {
-                return Ok(candidates[idx - 1].clone());
+                return Ok(DeviceSelection::Selected(candidates[idx - 1].clone()));
             }
         }
         if trimmed.starts_with("/dev/") {
-            return Ok(trimmed.to_string());
+            return Ok(DeviceSelection::Selected(trimmed.to_string()));
         }
         eprintln!(
             "Input '{trimmed}' was not a /dev path or a device index; enter a full path (e.g., /dev/ttyUSB0) or one of the listed numbers."
@@ -810,8 +940,8 @@ fn prompt_device(
     }
 }
 
-fn prompt_lcd_presence(prompter: &mut WizardPrompter) -> Result<bool> {
-    prompt_yes_no(prompter, "Is an LCD connected (y/n)", true)
+fn prompt_lcd_presence(prompter: &mut WizardPrompter, default: bool) -> Result<bool> {
+    prompt_yes_no(prompter, "Is an LCD connected (y/n)", default)
 }
 
 fn prompt_baud(prompter: &mut WizardPrompter, default: u32) -> Result<u32> {
@@ -853,14 +983,13 @@ fn prompt_role(prompter: &mut WizardPrompter, default: RolePreference) -> Result
         RolePreference::NoPreference => "standalone",
     };
     loop {
-        let response = prompter.prompt(
-            "Preferred role (server/client/standalone/auto)",
-            default_label,
-        )?;
+        let response =
+            prompter.prompt("Preferred role (1=server, 2=client, 3=auto)", default_label)?;
         match response.trim().to_ascii_lowercase().as_str() {
-            "server" => return Ok(RolePreference::PreferServer),
-            "client" => return Ok(RolePreference::PreferClient),
-            "standalone" | "auto" | "none" => return Ok(RolePreference::NoPreference),
+            "1" | "server" => return Ok(RolePreference::PreferServer),
+            "2" | "client" => return Ok(RolePreference::PreferClient),
+            "3" | "standalone" | "auto" | "none" => return Ok(RolePreference::NoPreference),
+            "?" | "help" => eprintln!("Choose 1=server, 2=client, 3=auto."),
             other => eprintln!(
                 "Unknown role '{other}', choose server, client, standalone, or auto."
             ),
